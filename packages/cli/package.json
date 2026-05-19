@@ -1,0 +1,20 @@
+{
+  "name": "fsn",
+  "version": "0.0.1",
+  "description": "Full-Stack Native — ship any Node fullstack framework as an Electron native app.",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "bin": {
+    "fsn": "./bin.js"
+  },
+  "files": [
+    "bin.js",
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

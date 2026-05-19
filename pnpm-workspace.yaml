@@ -1,0 +1,8 @@
+sharedWorkspaceLockfile: false
+
+packages:
+  - packages/*
+  - apps/examples/*
+
+onlyBuiltDependencies:
+  - electron
