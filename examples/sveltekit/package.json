@@ -6,6 +6,6 @@
     "build": "fsn build"
   },
   "devDependencies": {
-    "@fsn.dev/cli": "*"
+    "@fsn.dev/cli": "link:../../packages/cli"
   }
 }
