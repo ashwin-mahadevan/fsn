@@ -1,4 +1,7 @@
 {
   "name": "@fsn/monorepo",
-  "repository": "git+https://github.com/ashwin-mahadevan/fsn.git"
+  "repository": "git+https://github.com/ashwin-mahadevan/fsn.git",
+  "devDependencies": {
+    "@fsn.dev/cli": "workspace:*"
+  }
 }

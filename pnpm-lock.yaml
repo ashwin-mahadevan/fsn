@@ -6,4 +6,8 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      '@fsn.dev/cli':
+        specifier: workspace:*
+        version: link:packages/cli

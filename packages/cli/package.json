@@ -1,12 +1,14 @@
 {
-  "name": "fsn",
+  "name": "@fsn.dev/cli",
   "description": "FSN: Full-Stack Native. Use any full-stack framework to create a native app!",
   "license": "MIT",
   "version": "0.0.0",
   "type": "module",
   "main": "./index.js",
   "types": "./index.d.ts",
-  "bin": "./bin.js",
+  "bin": {
+    "fsn": "./bin.js"
+  },
   "files": [
     "index.js",
     "index.d.ts",

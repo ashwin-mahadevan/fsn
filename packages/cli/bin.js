@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-'use strict';
 
-const fs = require('node:fs');
-const fsp = require('node:fs/promises');
-const path = require('node:path');
-const os = require('node:os');
-const cp = require('node:child_process');
-const { pathToFileURL } = require('node:url');
+import { existsSync, readdirSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync, renameSync, cpSync, symlinkSync, readlinkSync, copyFileSync } from 'node:fs';
+import fsp from 'node:fs/promises';
+import { resolve, join, basename } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
 
@@ -23,7 +22,7 @@ function log(...args) {
 
 function run(cmd, args, options = {}) {
   log('$', cmd, args.join(' '), options.cwd ? `(cwd=${options.cwd})` : '');
-  const result = cp.spawnSync(cmd, args, {
+  const result = spawnSync(cmd, args, {
     stdio: 'inherit',
     shell: false,
     ...options,
@@ -62,14 +61,14 @@ async function main() {
 // ---------------------------------------------------------------------------
 
 async function init(projectName, framework) {
-  const projectDir = path.resolve(projectName);
-  if (fs.existsSync(projectDir)) {
-    const entries = fs.readdirSync(projectDir);
+  const projectDir = resolve(projectName);
+  if (existsSync(projectDir)) {
+    const entries = readdirSync(projectDir);
     if (entries.length > 0) {
       throw new Error(`${projectDir} already exists and is not empty.`);
     }
   } else {
-    fs.mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
   }
 
   if (framework === 'sveltekit') {
@@ -94,7 +93,7 @@ async function scaffoldSveltekit(projectDir) {
     'sv@latest',
     'create',
     'native',
-    '--template', 'minimal',
+    '--template', 'demo',
     '--types', 'ts',
     '--no-add-ons',
     '--no-install',
@@ -102,34 +101,22 @@ async function scaffoldSveltekit(projectDir) {
     '--no-download-check',
   ], { cwd: projectDir });
 
-  const nativeDir = path.join(projectDir, 'native');
+  const nativeDir = join(projectDir, 'native');
 
-  // Switch adapter-auto → adapter-static so `pnpm build` emits a self-contained
-  // static site that the Electron main process can serve via protocol.handle.
-  const sveltConfigPath = path.join(nativeDir, 'svelte.config.js');
-  let sveltConfig = fs.readFileSync(sveltConfigPath, 'utf8');
-  sveltConfig = sveltConfig.replace(
-    /@sveltejs\/adapter-auto/g,
-    '@sveltejs/adapter-static'
-  );
-  fs.writeFileSync(sveltConfigPath, sveltConfig);
-
-  const pkgPath = path.join(nativeDir, 'package.json');
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  pkg.devDependencies = pkg.devDependencies || {};
-  delete pkg.devDependencies['@sveltejs/adapter-auto'];
-  pkg.devDependencies['@sveltejs/adapter-static'] = '^3.0.8';
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-
-  // adapter-static requires every route to be prerenderable. Setting
-  // `prerender = true` in the root layout is the most ergonomic way to opt all
-  // routes in without per-page edits.
-  const routesDir = path.join(nativeDir, 'src', 'routes');
-  fs.mkdirSync(routesDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(routesDir, '+layout.ts'),
-    `export const prerender = true;\n`
-  );
+  // Swap the default adapter-auto for adapter-node so `pnpm build` emits a
+  // runnable Node server that the Electron main process can host — this is
+  // the whole point of FSN: ship fullstack frameworks, not static exports.
+  // `sv add` rewrites svelte.config.js and the package.json devDep for us.
+  run('pnpm', [
+    'dlx',
+    'sv@latest',
+    'add',
+    'sveltekit-adapter=adapter:node',
+    '-C', nativeDir,
+    '--no-install',
+    '--no-git-check',
+    '--no-download-check',
+  ]);
 }
 
 async function scaffoldNextjs(projectDir) {
@@ -151,21 +138,21 @@ async function scaffoldNextjs(projectDir) {
     '--disable-git',
   ], { cwd: projectDir });
 
-  const nativeDir = path.join(projectDir, 'native');
+  const nativeDir = join(projectDir, 'native');
 
   // create-next-app drops its own pnpm-workspace.yaml inside the package to
   // suppress postinstall scripts. Our parent already controls those via
   // `onlyBuiltDependencies`, and a nested workspace yaml confuses pnpm.
-  const nestedWs = path.join(nativeDir, 'pnpm-workspace.yaml');
-  if (fs.existsSync(nestedWs)) fs.rmSync(nestedWs);
+  const nestedWs = join(nativeDir, 'pnpm-workspace.yaml');
+  if (existsSync(nestedWs)) rmSync(nestedWs);
 
   // Set `output: 'export'` so `next build` produces a static `out/` directory
   // that the Electron main process can serve via protocol.handle. Also disable
   // the next/image optimizer because export mode does not support it.
-  const cfgTs = path.join(nativeDir, 'next.config.ts');
-  const cfgMjs = path.join(nativeDir, 'next.config.mjs');
-  const cfgJs = path.join(nativeDir, 'next.config.js');
-  const cfgPath = fs.existsSync(cfgTs) ? cfgTs : fs.existsSync(cfgMjs) ? cfgMjs : cfgJs;
+  const cfgTs = join(nativeDir, 'next.config.ts');
+  const cfgMjs = join(nativeDir, 'next.config.mjs');
+  const cfgJs = join(nativeDir, 'next.config.js');
+  const cfgPath = existsSync(cfgTs) ? cfgTs : existsSync(cfgMjs) ? cfgMjs : cfgJs;
   const useTs = cfgPath.endsWith('.ts');
 
   const cfg = useTs
@@ -188,27 +175,27 @@ const nextConfig = {
 
 export default nextConfig;
 `;
-  fs.writeFileSync(cfgPath, cfg);
+  writeFileSync(cfgPath, cfg);
 }
 
 function writeWorkspaceFiles(projectDir, projectName, framework) {
-  fs.writeFileSync(
-    path.join(projectDir, 'pnpm-workspace.yaml'),
+  writeFileSync(
+    join(projectDir, 'pnpm-workspace.yaml'),
     `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n`
   );
 
-  fs.writeFileSync(
-    path.join(projectDir, 'package.json'),
+  writeFileSync(
+    join(projectDir, 'package.json'),
     JSON.stringify(
       {
-        name: path.basename(projectName),
+        name: basename(projectName),
         private: true,
         version: '0.0.0',
         scripts: {
           build: 'fsn build',
         },
         devDependencies: {
-          fsn: '*',
+          '@fsn.dev/cli': '*',
         },
       },
       null,
@@ -216,17 +203,17 @@ function writeWorkspaceFiles(projectDir, projectName, framework) {
     ) + '\n'
   );
 
-  fs.writeFileSync(
-    path.join(projectDir, 'fsn.config.js'),
-    `/** @type {import('fsn').Config} */
+  writeFileSync(
+    join(projectDir, 'fsn.config.js'),
+    `/** @type {import('@fsn.dev/cli').Config} */
 export default {
   type: '${framework}',
 };
 `
   );
 
-  fs.writeFileSync(
-    path.join(projectDir, '.gitignore'),
+  writeFileSync(
+    join(projectDir, '.gitignore'),
     `node_modules\ndist\n.DS_Store\n*.log\n`
   );
 }
@@ -238,17 +225,17 @@ export default {
 async function build() {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
-  const nativeDir = path.join(cwd, 'native');
-  if (!fs.existsSync(nativeDir)) {
+  const nativeDir = join(cwd, 'native');
+  if (!existsSync(nativeDir)) {
     throw new Error(`native/ directory not found in ${cwd}`);
   }
 
-  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'fsn-build-'));
+  const workdir = mkdtempSync(join(tmpdir(), 'fsn-build-'));
   log(`workdir: ${workdir}`);
 
   try {
     // 1. Copy native/ → workdir/native (skip node_modules and prior build output)
-    const workNative = path.join(workdir, 'native');
+    const workNative = join(workdir, 'native');
     copyTree(nativeDir, workNative, [
       'node_modules',
       '.next',
@@ -264,30 +251,30 @@ async function build() {
 
     // 3. Locate framework build output
     const outputName = config.type === 'sveltekit' ? 'build' : 'out';
-    const frameworkOut = path.join(workNative, outputName);
-    if (!fs.existsSync(frameworkOut)) {
+    const frameworkOut = join(workNative, outputName);
+    if (!existsSync(frameworkOut)) {
       throw new Error(
         `Expected framework build output at ${frameworkOut} but didn't find it.`
       );
     }
 
     // 4. Move output to workdir/web and discard the native source
-    const webDir = path.join(workdir, 'web');
-    fs.renameSync(frameworkOut, webDir);
-    fs.rmSync(workNative, { recursive: true, force: true });
+    const webDir = join(workdir, 'web');
+    renameSync(frameworkOut, webDir);
+    rmSync(workNative, { recursive: true, force: true });
 
     // 5. Write the Electron main process
-    fs.writeFileSync(
-      path.join(workdir, 'application.js'),
-      buildApplicationJs(path.basename(cwd))
+    writeFileSync(
+      join(workdir, 'application.js'),
+      buildApplicationJs(basename(cwd))
     );
 
     // 6. Write a package.json for the Electron app and install Electron +
     //    @electron/packager. We use npm here (not pnpm) because the workdir
     //    is throwaway and npm doesn't gate Electron's post-install download.
-    const appName = sanitizeAppName(path.basename(cwd));
-    fs.writeFileSync(
-      path.join(workdir, 'package.json'),
+    const appName = sanitizeAppName(basename(cwd));
+    writeFileSync(
+      join(workdir, 'package.json'),
       JSON.stringify(
         {
           name: appName,
@@ -316,11 +303,11 @@ async function build() {
     ], { cwd: workdir });
 
     // 8. Copy result back to ./dist
-    const projectDist = path.join(cwd, 'dist');
-    if (fs.existsSync(projectDist)) {
-      fs.rmSync(projectDist, { recursive: true, force: true });
+    const projectDist = join(cwd, 'dist');
+    if (existsSync(projectDist)) {
+      rmSync(projectDist, { recursive: true, force: true });
     }
-    fs.cpSync(path.join(workdir, 'dist'), projectDist, { recursive: true });
+    cpSync(join(workdir, 'dist'), projectDist, { recursive: true });
 
     log(`✓ Built native app at ${projectDist}`);
   } finally {
@@ -332,8 +319,8 @@ async function build() {
 }
 
 async function loadConfig(cwd) {
-  const configPath = path.join(cwd, 'fsn.config.js');
-  if (!fs.existsSync(configPath)) {
+  const configPath = join(cwd, 'fsn.config.js');
+  if (!existsSync(configPath)) {
     throw new Error(`fsn.config.js not found in ${cwd}`);
   }
   const mod = await import(pathToFileURL(configPath).href);
@@ -352,17 +339,17 @@ function sanitizeAppName(name) {
 
 function copyTree(src, dest, exclude = []) {
   const skip = new Set(exclude);
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
     if (skip.has(entry.name)) continue;
-    const s = path.join(src, entry.name);
-    const d = path.join(dest, entry.name);
+    const s = join(src, entry.name);
+    const d = join(dest, entry.name);
     if (entry.isDirectory()) {
       copyTree(s, d, exclude);
     } else if (entry.isSymbolicLink()) {
-      fs.symlinkSync(fs.readlinkSync(s), d);
+      symlinkSync(readlinkSync(s), d);
     } else {
-      fs.copyFileSync(s, d);
+      copyFileSync(s, d);
     }
   }
 }
