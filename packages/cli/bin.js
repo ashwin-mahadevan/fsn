@@ -393,12 +393,31 @@ function buildApplicationJs(projectName) {
 // import and call.
 
 const path = require('node:path');
+const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { Readable } = require('node:stream');
 const { app, BrowserWindow, protocol, net } = require('electron');
 
 const APP_HOST = 'app.localhost';
 const APP_ORIGIN = 'http://' + APP_HOST;
+
+// Tell adapter-node (and via it, SvelteKit) the canonical origin so its
+// CSRF check + URL construction don't rely on per-request host derivation.
+// next.js ignores this env var; the host-header fallback covers it.
+process.env.ORIGIN = APP_ORIGIN;
+
+// Logging — writes to stderr (visible when run from a terminal) and to
+// {userData}/fsn.log so the trail is recoverable when the app was launched
+// as a desktop entry. logFile is initialized lazily after app.whenReady()
+// because app.getPath('userData') isn't available before then.
+let logFile = null;
+function log(...args) {
+  const line = '[fsn ' + new Date().toISOString() + '] ' + args.map(String).join(' ') + '\\n';
+  process.stderr.write(line);
+  if (logFile) {
+    try { fs.appendFileSync(logFile, line); } catch (_) { /* best effort */ }
+  }
+}
 
 // === Web -> Node IncomingMessage shim ===
 // The framework handlers want a real-ish IncomingMessage: a Readable stream
@@ -411,6 +430,15 @@ function toNodeRequest(webRequest, url) {
     : Readable.from([]);
   const headers = {};
   for (const [k, v] of webRequest.headers) headers[k.toLowerCase()] = v;
+  // Electron's protocol.handle doesn't always populate a host header (it's
+  // implied by the URL), but SvelteKit's getRequest() and Next's request
+  // preprocessing both refuse to parse a request without one — manifesting
+  // as a generic 400 long before any of our route code runs.
+  if (!headers.host) headers.host = url.host;
+  // Same-origin by construction (protocol.handle only fires for APP_HOST),
+  // so backfill Origin to match. Without this, SvelteKit's CSRF check
+  // rejects every form POST with a 403.
+  if (!headers.origin) headers.origin = 'http://' + url.host;
   Object.assign(body, {
     method: webRequest.method,
     url: url.pathname + url.search,
@@ -555,6 +583,9 @@ async function invokeHandler(webRequest, url) {
   await handlerReady;
   const req = toNodeRequest(webRequest, url);
   const res = new CaptureResponse();
+  if (webRequest.method !== 'GET' && webRequest.method !== 'HEAD') {
+    log('  shim headers:', JSON.stringify(req.headers));
+  }
   // fsn.handler.mjs always exposes a (req, res) => Promise<void> contract,
   // so this is framework-agnostic.
   await handler(req, res);
@@ -562,22 +593,35 @@ async function invokeHandler(webRequest, url) {
 }
 
 app.whenReady().then(async () => {
+  logFile = path.join(app.getPath('userData'), 'fsn.log');
+  try { fs.writeFileSync(logFile, ''); } catch (_) { /* best effort */ }
+  log('app ready, log file at', logFile);
+
   protocol.handle('http', async (request) => {
     const url = new URL(request.url);
     if (url.host.toLowerCase() !== APP_HOST) {
+      log('pass-through', request.method, request.url);
       try {
         return await net.fetch(request, { bypassCustomProtocolHandlers: true });
       } catch (err) {
+        log('pass-through error', err && err.stack || err);
         return new Response('Upstream fetch failed: ' + err.message, {
           status: 502,
           headers: { 'content-type': 'text/plain; charset=utf-8' },
         });
       }
     }
+    log('->', request.method, url.pathname + url.search);
     try {
-      return await invokeHandler(request, url);
+      const response = await invokeHandler(request, url);
+      log('<-', response.status, request.method, url.pathname);
+      if (response.status >= 400) {
+        const reqHeaders = Object.fromEntries(request.headers);
+        log('  request headers:', JSON.stringify(reqHeaders));
+      }
+      return response;
     } catch (err) {
-      console.error('[fsn] handler error:', err);
+      log('handler error', request.method, url.pathname, '-', err && err.stack || err);
       return new Response('Internal error: ' + (err && err.stack || err), {
         status: 500,
         headers: { 'content-type': 'text/plain; charset=utf-8' },
@@ -585,7 +629,12 @@ app.whenReady().then(async () => {
     }
   });
 
-  await handlerReady;
+  try {
+    await handlerReady;
+    log('handler module loaded');
+  } catch (err) {
+    log('handler module failed to load:', err && err.stack || err);
+  }
 
   const win = new BrowserWindow({
     width: 1024,
