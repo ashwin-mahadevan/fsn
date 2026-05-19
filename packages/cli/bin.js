@@ -145,6 +145,184 @@ async function scaffoldNextjs(projectDir) {
   // `onlyBuiltDependencies`, and a nested workspace yaml confuses pnpm.
   const nestedWs = join(nativeDir, 'pnpm-workspace.yaml');
   if (existsSync(nestedWs)) rmSync(nestedWs);
+
+  // Overlay a tiny fullstack demo on top of the default template: server
+  // components rendering shared state, a server action that mutates it, and
+  // a route handler that returns the same state as JSON. Persistence is
+  // in-memory — the point is to confirm the dynamic server features round-
+  // trip through FSN's protocol.handle bridge, not to teach data modeling.
+  const libDir = join(nativeDir, 'src', 'lib');
+  mkdirSync(libDir, { recursive: true });
+  writeFileSync(
+    join(libDir, 'store.ts'),
+    `// In-memory message store. State lives in the Electron main-process
+// module graph for the life of the app — restarts wipe it. Real apps would
+// swap this for SQLite, a file, etc.
+
+export type Message = { id: number; text: string; createdAt: string };
+
+const messages: Message[] = [
+  { id: 1, text: 'Welcome to your FSN app.', createdAt: new Date().toISOString() },
+];
+let nextId = messages.length + 1;
+
+export function getMessages(): Message[] {
+  return messages.slice().reverse();
+}
+
+export function addMessage(text: string): Message {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error('text required');
+  const message: Message = {
+    id: nextId++,
+    text: trimmed,
+    createdAt: new Date().toISOString(),
+  };
+  messages.push(message);
+  return message;
+}
+`
+  );
+
+  const appSrcDir = join(nativeDir, 'src', 'app');
+  mkdirSync(appSrcDir, { recursive: true });
+  writeFileSync(
+    join(appSrcDir, 'actions.ts'),
+    `'use server';
+
+import { revalidatePath } from 'next/cache';
+import { addMessage } from '@/lib/store';
+
+export async function postMessage(formData: FormData) {
+  const text = String(formData.get('text') ?? '');
+  if (!text.trim()) return;
+  addMessage(text);
+  revalidatePath('/');
+}
+`
+  );
+
+  const apiDir = join(appSrcDir, 'api', 'messages');
+  mkdirSync(apiDir, { recursive: true });
+  writeFileSync(
+    join(apiDir, 'route.ts'),
+    `import { NextResponse } from 'next/server';
+import { getMessages, addMessage } from '@/lib/store';
+
+export async function GET() {
+  return NextResponse.json({ messages: getMessages() });
+}
+
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => ({}));
+  if (typeof body.text !== 'string') {
+    return NextResponse.json({ error: 'text required' }, { status: 400 });
+  }
+  try {
+    const message = addMessage(body.text);
+    return NextResponse.json({ message }, { status: 201 });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 400 });
+  }
+}
+`
+  );
+
+  // A trivial static route. No dynamic functions, no module-scope mutation
+  // — next will prerender this at build time and serve the resulting HTML
+  // as a file, the same way it would for `next start`.
+  const aboutDir = join(appSrcDir, 'about');
+  mkdirSync(aboutDir, { recursive: true });
+  writeFileSync(
+    join(aboutDir, 'page.tsx'),
+    `export default function About() {
+  return (
+    <main style={{ maxWidth: 640, margin: '2rem auto', fontFamily: 'system-ui, sans-serif', padding: '0 1rem' }}>
+      <h1>About this app</h1>
+      <p>
+        This page has no dynamic data and uses no dynamic functions, so next
+        prerendered it at build time. FSN's protocol.handle serves the static
+        HTML straight from the build output — no server work per request.
+      </p>
+      <p><a href="/">← Back to the dynamic home page</a></p>
+    </main>
+  );
+}
+`
+  );
+
+  // Overwrite the default page.tsx with a server component that exercises
+  // <Suspense>, a server action via <form action={…}>, and a link to the
+  // route handler so the user can verify each piece by clicking around.
+  writeFileSync(
+    join(appSrcDir, 'page.tsx'),
+    `import { Suspense } from 'react';
+import { getMessages } from '@/lib/store';
+import { postMessage } from './actions';
+
+export default function Page() {
+  return (
+    <main style={{ maxWidth: 640, margin: '2rem auto', fontFamily: 'system-ui, sans-serif', padding: '0 1rem' }}>
+      <h1>FSN Next.js example</h1>
+      <p>This page is a React Server Component, rendered inside Electron via FSN.</p>
+
+      <section>
+        <h2>Post a message</h2>
+        <p>Submits a <code>&lt;form action={'{'}postMessage{'}'}&gt;</code> server action.</p>
+        <form action={postMessage} style={{ display: 'flex', gap: '0.5rem' }}>
+          <input
+            name="text"
+            type="text"
+            required
+            placeholder="Say something…"
+            style={{ flex: 1, padding: '0.5rem' }}
+          />
+          <button type="submit" style={{ padding: '0.5rem 1rem' }}>Post</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Messages (server-rendered)</h2>
+        <Suspense fallback={<p>Loading…</p>}>
+          <Messages />
+        </Suspense>
+      </section>
+
+      <section>
+        <h2>Route handler</h2>
+        <p>
+          <a href="/api/messages">GET /api/messages</a> — returns the same data as JSON.
+        </p>
+      </section>
+
+      <section>
+        <h2>Static page</h2>
+        <p>
+          <a href="/about">/about</a> — a fully prerendered server component (no dynamic data),
+          served as static HTML straight out of the next build output.
+        </p>
+      </section>
+    </main>
+  );
+}
+
+async function Messages() {
+  const messages = getMessages();
+  if (messages.length === 0) return <p>No messages yet.</p>;
+  return (
+    <ul>
+      {messages.map((m) => (
+        <li key={m.id}>
+          <time dateTime={m.createdAt}>{new Date(m.createdAt).toLocaleTimeString()}</time>
+          {' — '}
+          {m.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+`
+  );
 }
 
 function writeWorkspaceFiles(projectDir, projectName, framework) {
