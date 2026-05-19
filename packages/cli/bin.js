@@ -145,37 +145,6 @@ async function scaffoldNextjs(projectDir) {
   // `onlyBuiltDependencies`, and a nested workspace yaml confuses pnpm.
   const nestedWs = join(nativeDir, 'pnpm-workspace.yaml');
   if (existsSync(nestedWs)) rmSync(nestedWs);
-
-  // Set `output: 'export'` so `next build` produces a static `out/` directory
-  // that the Electron main process can serve via protocol.handle. Also disable
-  // the next/image optimizer because export mode does not support it.
-  const cfgTs = join(nativeDir, 'next.config.ts');
-  const cfgMjs = join(nativeDir, 'next.config.mjs');
-  const cfgJs = join(nativeDir, 'next.config.js');
-  const cfgPath = existsSync(cfgTs) ? cfgTs : existsSync(cfgMjs) ? cfgMjs : cfgJs;
-  const useTs = cfgPath.endsWith('.ts');
-
-  const cfg = useTs
-    ? `import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
-  output: 'export',
-  images: { unoptimized: true },
-  trailingSlash: true,
-};
-
-export default nextConfig;
-`
-    : `/** @type {import('next').NextConfig} */
-const nextConfig = {
-  output: 'export',
-  images: { unoptimized: true },
-  trailingSlash: true,
-};
-
-export default nextConfig;
-`;
-  writeFileSync(cfgPath, cfg);
 }
 
 function writeWorkspaceFiles(projectDir, projectName, framework) {
@@ -234,42 +203,104 @@ async function build() {
   log(`workdir: ${workdir}`);
 
   try {
-    // 1. Copy native/ → workdir/native (skip node_modules and prior build output)
-    const workNative = join(workdir, 'native');
-    copyTree(nativeDir, workNative, [
+    // 1. Copy the whole project → workdir (skip node_modules, prior build
+    //    output, and SCM noise). Bringing the project root along means pnpm
+    //    picks up the consumer's pnpm-workspace.yaml — including its
+    //    `allowBuilds` approvals — during the install in step 2.
+    copyTree(cwd, workdir, [
       'node_modules',
       '.next',
       '.svelte-kit',
       'build',
       'out',
       'dist',
+      '.git',
     ]);
+    const workNative = join(workdir, 'native');
 
-    // 2. Install + build the framework
+    // 2. Install + build the framework.
     run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
     run('pnpm', ['build'], { cwd: workNative });
 
-    // 3. Locate framework build output
-    const outputName = config.type === 'sveltekit' ? 'build' : 'out';
-    const frameworkOut = join(workNative, outputName);
-    if (!existsSync(frameworkOut)) {
-      throw new Error(
-        `Expected framework build output at ${frameworkOut} but didn't find it.`
+    // 3. Stage the framework's runtime artifacts so the Electron main can
+    //    import its handler at startup. Each framework gets the layout its
+    //    handler expects:
+    //      - sveltekit (adapter-node): workdir/build/ holds handler.js plus
+    //        the bundled server + client assets. node_modules isn't needed
+    //        because adapter-node inlines its server deps.
+    //      - nextjs (custom server): we keep workdir/native/ as-is. The
+    //        Electron main calls next({ dir: './native' }), and next reads
+    //        .next/, public/, and node_modules/next from inside native/.
+    if (config.type === 'sveltekit') {
+      const adapterOut = join(workNative, 'build');
+      if (!existsSync(adapterOut)) {
+        throw new Error(`Expected adapter-node output at ${adapterOut} but didn't find it.`);
+      }
+      renameSync(adapterOut, join(workdir, 'build'));
+      // adapter-node's handler.js is ESM but doesn't ship a build/package.json.
+      // Mark the dir as ESM so Node skips the reparse-from-CJS warning when
+      // application.js (CJS) dynamic-imports it.
+      writeFileSync(
+        join(workdir, 'build', 'package.json'),
+        JSON.stringify({ type: 'module' }, null, 2) + '\n'
       );
+      rmSync(workNative, { recursive: true, force: true });
+    } else if (config.type === 'nextjs') {
+      const nextOut = join(workNative, '.next');
+      if (!existsSync(nextOut)) {
+        throw new Error(`Expected next build output at ${nextOut} but didn't find it.`);
+      }
+      // pnpm's isolated install leaves workdir/native/node_modules full of
+      // symlinks pointing up into workdir/node_modules/.pnpm — that breaks
+      // require() once the tree is asar-bundled. `pnpm deploy` rewrites the
+      // tree with all prod deps fully inlined and devDeps stripped, using
+      // --node-linker=hoisted so node_modules is flat (no .pnpm subdir).
+      const deployDir = join(workdir, '.fsn-native-deploy');
+      run('pnpm', ['--filter', 'native', 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', deployDir], { cwd: workdir });
+      // `pnpm deploy` only copies the package's published files (package.json,
+      // README, etc.), not build artifacts or static assets. Layer those back
+      // on so the runtime can find .next/, public/, and next.config.*.
+      cpSync(nextOut, join(deployDir, '.next'), { recursive: true });
+      for (const dir of ['public', 'src']) {
+        const src = join(workNative, dir);
+        if (existsSync(src)) cpSync(src, join(deployDir, dir), { recursive: true });
+      }
+      for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
+        const src = join(workNative, cfg);
+        if (existsSync(src)) cpSync(src, join(deployDir, cfg));
+      }
+      rmSync(workNative, { recursive: true, force: true });
+      renameSync(deployDir, workNative);
+      // Strip dev-only / SCM noise that snuck through copyTree's filter.
+      for (const junk of ['.git', '.gitignore', 'README.md', 'AGENTS.md', 'CLAUDE.md']) {
+        rmSync(join(workNative, junk), { recursive: true, force: true });
+      }
+    }
+    // Clear consumer-only files at workdir root (their package.json,
+    // fsn.config.js, pnpm-workspace.yaml, .gitignore, …) and any prior
+    // build output, but keep the artifacts the runtime needs:
+    //   - sveltekit: only 'build/' (adapter-node's output is self-contained;
+    //     its server deps are bundled inline by esbuild).
+    //   - nextjs:    'native/' (.next + public + src + package.json) plus
+    //     'node_modules/' (pnpm's isolated install — workdir/native/node_modules
+    //     is full of symlinks pointing up here, so removing it would break
+    //     `next` resolution at runtime).
+    const keepAtRoot = config.type === 'sveltekit'
+      ? new Set(['build'])
+      : new Set(['native']);
+    for (const entry of readdirSync(workdir)) {
+      if (!keepAtRoot.has(entry)) {
+        rmSync(join(workdir, entry), { recursive: true, force: true });
+      }
     }
 
-    // 4. Move output to workdir/web and discard the native source
-    const webDir = join(workdir, 'web');
-    renameSync(frameworkOut, webDir);
-    rmSync(workNative, { recursive: true, force: true });
-
-    // 5. Write the Electron main process
+    // 4. Write the Electron main process
     writeFileSync(
       join(workdir, 'application.js'),
-      buildApplicationJs(basename(cwd))
+      buildApplicationJs(basename(cwd), config.type)
     );
 
-    // 6. Write a package.json for the Electron app and install Electron +
+    // 5. Write a package.json for the Electron app and install Electron +
     //    @electron/packager. We use npm here (not pnpm) because the workdir
     //    is throwaway and npm doesn't gate Electron's post-install download.
     const appName = sanitizeAppName(basename(cwd));
@@ -292,7 +323,7 @@ async function build() {
       '@electron/packager@latest',
     ], { cwd: workdir });
 
-    // 7. Package the app
+    // 6. Package the app
     const platform = process.platform === 'darwin' ? 'darwin'
       : process.platform === 'win32' ? 'win32' : 'linux';
     run('npx', ['--yes', '@electron/packager', '.', appName,
@@ -302,7 +333,7 @@ async function build() {
       '--arch', process.arch,
     ], { cwd: workdir });
 
-    // 8. Copy result back to ./dist
+    // 7. Copy result back to ./dist
     const projectDist = join(cwd, 'dist');
     if (existsSync(projectDist)) {
       rmSync(projectDist, { recursive: true, force: true });
@@ -354,77 +385,217 @@ function copyTree(src, dest, exclude = []) {
   }
 }
 
-function buildApplicationJs(projectName) {
+function buildApplicationJs(projectName, framework) {
+  // Framework-specific snippet that initializes `runHandler` — a normalized
+  // (req, res) => Promise<void> wrapper around whatever the framework hands
+  // us. Both adapter-node's handler (Polka middleware) and Next's custom-
+  // server handler take a Node IncomingMessage + ServerResponse pair, so
+  // the Web↔Node shim below is shared.
+  const initBlock = framework === 'sveltekit' ? `
+const { pathToFileURL } = require('node:url');
+
+async function initHandler() {
+  // adapter-node's handler.js is ESM, so we need dynamic import.
+  const handlerUrl = pathToFileURL(path.join(__dirname, 'build', 'handler.js'));
+  const mod = await import(handlerUrl.href);
+  const handler = mod.handler;
+  return (req, res) => new Promise((resolve, reject) => {
+    res._endPromise.then(resolve, reject);
+    try {
+      handler(req, res, (err) => {
+        if (err) { reject(err); return; }
+        if (!res._done) {
+          res.statusCode = 404;
+          res.end('Not found');
+        }
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}` : `
+const { createRequire } = require('node:module');
+
+async function initHandler() {
+  // next is CJS; resolve it against the bundled native/ project so its
+  // own deps (react, react-dom, etc.) come from native/node_modules.
+  const nativeDir = path.join(__dirname, 'native');
+  const nativeRequire = createRequire(path.join(nativeDir, 'package.json'));
+  const next = nativeRequire('next');
+  const factory = next.default || next;
+  const nextApp = factory({ dev: false, dir: nativeDir });
+  await nextApp.prepare();
+  const handler = nextApp.getRequestHandler();
+  return (req, res) => Promise.resolve(handler(req, res)).then(() => res._endPromise);
+}`;
+
   return `'use strict';
 
-// Electron main process. Serves the static framework build (web/) over a
-// protocol handler bound to a virtual host, then loads the homepage in a
-// BrowserWindow. This is the MVP path — protocol.handle for static files only.
-// The full IpcView bridge (mounting a live Node handler) is a future upgrade.
+// Electron main process. Intercepts every same-origin http request via
+// protocol.handle, shims the Web Request/Response pair into Node Incoming-
+// Message/ServerResponse, and runs the framework's handler against them.
+// No port, no subprocess — the framework's "server" is just a module we
+// import and call.
 
 const path = require('node:path');
-const fs = require('node:fs');
+const { Readable } = require('node:stream');
 const { app, BrowserWindow, protocol, net } = require('electron');
 
-const WEB_DIR = path.join(__dirname, 'web');
 const APP_HOST = 'app.localhost';
 const APP_ORIGIN = 'http://' + APP_HOST;
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.htm':  'text/html; charset=utf-8',
-  '.js':   'text/javascript; charset=utf-8',
-  '.mjs':  'text/javascript; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.txt':  'text/plain; charset=utf-8',
-  '.svg':  'image/svg+xml',
-  '.png':  'image/png',
-  '.jpg':  'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif':  'image/gif',
-  '.webp': 'image/webp',
-  '.ico':  'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2':'font/woff2',
-  '.ttf':  'font/ttf',
-  '.otf':  'font/otf',
-  '.map':  'application/json; charset=utf-8',
-};
-
-function mimeFor(file) {
-  return MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+// === Web -> Node IncomingMessage shim ===
+// The framework handlers want a real-ish IncomingMessage: a Readable stream
+// with method/url/headers/socket. We synthesize one over the Web Request's
+// body stream, with just enough surface to satisfy adapter-node's getRequest()
+// and next.js's request preprocessing.
+function toNodeRequest(webRequest, url) {
+  const body = webRequest.body
+    ? Readable.fromWeb(webRequest.body)
+    : Readable.from([]);
+  const headers = {};
+  for (const [k, v] of webRequest.headers) headers[k.toLowerCase()] = v;
+  Object.assign(body, {
+    method: webRequest.method,
+    url: url.pathname + url.search,
+    headers,
+    rawHeaders: Object.entries(headers).flatMap(([k, v]) => [k, v]),
+    httpVersion: '1.1',
+    httpVersionMajor: 1,
+    httpVersionMinor: 1,
+    complete: false,
+    socket: { encrypted: false, remoteAddress: '127.0.0.1', remotePort: 0 },
+    connection: { encrypted: false, remoteAddress: '127.0.0.1', remotePort: 0 },
+  });
+  return body;
 }
 
-// Resolve a request path against WEB_DIR, guarding against traversal.
-function resolveWithin(reqPath) {
-  const decoded = decodeURIComponent(reqPath.split('?')[0]);
-  const resolved = path.normalize(path.join(WEB_DIR, decoded));
-  const root = WEB_DIR + path.sep;
-  if (resolved !== WEB_DIR && !resolved.startsWith(root)) return null;
-  return resolved;
-}
-
-function pickFile(target) {
-  // Try the exact target, then target + .html, then target/index.html,
-  // then the SPA fallback at WEB_DIR/index.html. Static-site generators
-  // produce one of these shapes depending on trailingSlash / cleanURLs.
-  try {
-    const stat = fs.statSync(target);
-    if (stat.isFile()) return target;
-    if (stat.isDirectory()) {
-      const idx = path.join(target, 'index.html');
-      if (fs.existsSync(idx)) return idx;
+// === Node ServerResponse stand-in ===
+// Captures statusCode/headers/body the way @sveltejs/kit/node's setResponse
+// and Next.js write to it, then exposes _endPromise so the caller can await
+// completion and read the captured state. Not a real Writable — we only
+// implement the subset the frameworks touch.
+class CaptureResponse {
+  constructor() {
+    this.statusCode = 200;
+    this.statusMessage = '';
+    this.headersSent = false;
+    this._headers = new Map();
+    this._chunks = [];
+    this._done = false;
+    this._endPromise = new Promise((resolve, reject) => {
+      this._resolveEnd = resolve;
+      this._rejectEnd = reject;
+    });
+  }
+  setHeader(name, value) { this._headers.set(name.toLowerCase(), value); return this; }
+  getHeader(name)        { return this._headers.get(name.toLowerCase()); }
+  getHeaders()           { return Object.fromEntries(this._headers); }
+  hasHeader(name)        { return this._headers.has(name.toLowerCase()); }
+  removeHeader(name)     { this._headers.delete(name.toLowerCase()); }
+  appendHeader(name, value) {
+    const k = name.toLowerCase();
+    const existing = this._headers.get(k);
+    if (existing == null) this._headers.set(k, value);
+    else if (Array.isArray(existing)) this._headers.set(k, existing.concat(value));
+    else this._headers.set(k, [existing].concat(value));
+    return this;
+  }
+  writeHead(status, statusMessage, headers) {
+    this.statusCode = status;
+    if (typeof statusMessage === 'string') {
+      this.statusMessage = statusMessage;
+    } else {
+      headers = statusMessage;
     }
-  } catch (_) {}
-  const htmlVariant = target + '.html';
-  if (fs.existsSync(htmlVariant)) return htmlVariant;
-  const fallback = path.join(WEB_DIR, 'index.html');
-  if (fs.existsSync(fallback)) return fallback;
-  return null;
+    if (Array.isArray(headers)) {
+      for (let i = 0; i < headers.length; i += 2) this.setHeader(headers[i], headers[i + 1]);
+    } else if (headers) {
+      for (const [k, v] of Object.entries(headers)) this.setHeader(k, v);
+    }
+    this.headersSent = true;
+    return this;
+  }
+  flushHeaders() { this.headersSent = true; }
+  // Node-internal hooks the http module calls before serializing headers.
+  // Next.js's compiled handlers go through these directly; faking them as
+  // no-ops keeps the response capture happy.
+  _implicitHeader() { this.headersSent = true; }
+  _writeRaw(_chunk, _encoding, cb) { if (cb) cb(); return true; }
+  _storeHeader() { this.headersSent = true; }
+  addTrailers() {}
+  setTimeout() { return this; }
+  cork() {}
+  uncork() {}
+  write(chunk, encoding, cb) {
+    if (typeof encoding === 'function') { cb = encoding; encoding = undefined; }
+    if (chunk != null) {
+      if (typeof chunk === 'string') chunk = Buffer.from(chunk, encoding || 'utf8');
+      else if (!Buffer.isBuffer(chunk)) chunk = Buffer.from(chunk);
+      this._chunks.push(chunk);
+    }
+    if (cb) cb();
+    return true;
+  }
+  end(chunk, encoding, cb) {
+    if (typeof chunk === 'function') { cb = chunk; chunk = undefined; encoding = undefined; }
+    else if (typeof encoding === 'function') { cb = encoding; encoding = undefined; }
+    if (chunk != null) this.write(chunk, encoding);
+    if (!this._done) {
+      this._done = true;
+      this._resolveEnd();
+    }
+    if (cb) cb();
+    return this;
+  }
+  on(event, listener) {
+    if (event === 'close' || event === 'finish') this._endPromise.then(listener);
+    return this;
+  }
+  once(event, listener) { return this.on(event, listener); }
+  off()                 { return this; }
+  removeListener()      { return this; }
+  emit()                { return false; }
+  destroy(err) {
+    if (this._done) return this;
+    this._done = true;
+    if (err) this._rejectEnd(err);
+    else this._resolveEnd();
+    return this;
+  }
+  get writable()         { return !this._done; }
+  get writableEnded()    { return this._done; }
+  get writableFinished() { return this._done; }
+  get finished()         { return this._done; }
 }
 
-app.whenReady().then(() => {
+function captureToResponse(res) {
+  const headers = new Headers();
+  for (const [k, v] of res._headers) {
+    if (Array.isArray(v)) for (const vv of v) headers.append(k, String(vv));
+    else headers.set(k, String(v));
+  }
+  const body = res._chunks.length === 0 ? null : Buffer.concat(res._chunks);
+  return new Response(body, {
+    status: res.statusCode,
+    statusText: res.statusMessage || undefined,
+    headers,
+  });
+}
+${initBlock}
+
+let runHandler;
+const handlerReady = initHandler().then((fn) => { runHandler = fn; });
+
+async function invokeHandler(webRequest, url) {
+  await handlerReady;
+  const req = toNodeRequest(webRequest, url);
+  const res = new CaptureResponse();
+  await runHandler(req, res);
+  return captureToResponse(res);
+}
+
+app.whenReady().then(async () => {
   protocol.handle('http', async (request) => {
     const url = new URL(request.url);
     if (url.host.toLowerCase() !== APP_HOST) {
@@ -437,23 +608,18 @@ app.whenReady().then(() => {
         });
       }
     }
-    const target = resolveWithin(url.pathname);
-    if (!target) {
-      return new Response('Bad request', { status: 400 });
-    }
-    const file = pickFile(target);
-    if (!file) {
-      return new Response('Not Found', {
-        status: 404,
+    try {
+      return await invokeHandler(request, url);
+    } catch (err) {
+      console.error('[fsn] handler error:', err);
+      return new Response('Internal error: ' + (err && err.stack || err), {
+        status: 500,
         headers: { 'content-type': 'text/plain; charset=utf-8' },
       });
     }
-    const data = await fs.promises.readFile(file);
-    return new Response(data, {
-      status: 200,
-      headers: { 'content-type': mimeFor(file) },
-    });
   });
+
+  await handlerReady;
 
   const win = new BrowserWindow({
     width: 1024,
