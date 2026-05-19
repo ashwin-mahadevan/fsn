@@ -1,7 +1,4 @@
 {
-  "name": "fsn-monorepo",
-  "private": true,
-  "version": "0.0.0",
-  "description": "FSN — Full-Stack Native. Mount any Node fullstack framework inside an Electron native app.",
-  "packageManager": "pnpm@10.33.4"
+  "name": "@fsn/monorepo",
+  "repository": "git+https://github.com/ashwin-mahadevan/fsn.git"
 }
