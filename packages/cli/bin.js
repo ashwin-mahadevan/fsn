@@ -222,27 +222,31 @@ async function build() {
     run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
     run('pnpm', ['build'], { cwd: workNative });
 
-    // 3. Stage the framework's runtime artifacts so the Electron main can
-    //    import its handler at startup. Each framework gets the layout its
-    //    handler expects:
-    //      - sveltekit (adapter-node): workdir/build/ holds handler.js plus
-    //        the bundled server + client assets. node_modules isn't needed
-    //        because adapter-node inlines its server deps.
-    //      - nextjs (custom server): we keep workdir/native/ as-is. The
-    //        Electron main calls next({ dir: './native' }), and next reads
-    //        .next/, public/, and node_modules/next from inside native/.
+    // 3. Stage the framework's runtime artifacts under a single workdir/app/
+    //    directory and drop a fsn.handler.mjs alongside them. The Electron
+    //    main only ever imports './app/fsn.handler.mjs' — every framework-
+    //    specific detail (which file exports the handler, where node_modules
+    //    lives) is confined to the handler module.
+    const appDir = join(workdir, 'app');
     if (config.type === 'sveltekit') {
       const adapterOut = join(workNative, 'build');
       if (!existsSync(adapterOut)) {
         throw new Error(`Expected adapter-node output at ${adapterOut} but didn't find it.`);
       }
-      renameSync(adapterOut, join(workdir, 'build'));
-      // adapter-node's handler.js is ESM but doesn't ship a build/package.json.
-      // Mark the dir as ESM so Node skips the reparse-from-CJS warning when
-      // application.js (CJS) dynamic-imports it.
+      renameSync(adapterOut, appDir);
+      // adapter-node's handler.js is ESM. Mark the dir as ESM via a
+      // package.json so Node skips the reparse-from-CJS perf warning, and
+      // re-export the handler under our canonical name.
       writeFileSync(
-        join(workdir, 'build', 'package.json'),
+        join(appDir, 'package.json'),
         JSON.stringify({ type: 'module' }, null, 2) + '\n'
+      );
+      // Wrap adapter-node's Polka middleware so fsn.handler.mjs exports the
+      // same (req, res) => Promise<void> shape that next's getRequestHandler
+      // gives us — the Electron main never has to branch on framework.
+      writeFileSync(
+        join(appDir, 'fsn.handler.mjs'),
+        `import { handler as middleware } from './handler.js';\n\nexport const handler = (req, res) => new Promise((resolve, reject) => {\n  const done = (err) => (err ? reject(err) : resolve());\n  res.once('finish', () => done());\n  res.once('close', () => done());\n  try {\n    middleware(req, res, (err) => {\n      if (err) return done(err);\n      if (!res.writableEnded) {\n        res.statusCode = 404;\n        res.end('Not found');\n      }\n    });\n  } catch (err) {\n    done(err);\n  }\n});\n`
       );
       rmSync(workNative, { recursive: true, force: true });
     } else if (config.type === 'nextjs') {
@@ -255,41 +259,35 @@ async function build() {
       // require() once the tree is asar-bundled. `pnpm deploy` rewrites the
       // tree with all prod deps fully inlined and devDeps stripped, using
       // --node-linker=hoisted so node_modules is flat (no .pnpm subdir).
-      const deployDir = join(workdir, '.fsn-native-deploy');
-      run('pnpm', ['--filter', 'native', 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', deployDir], { cwd: workdir });
-      // `pnpm deploy` only copies the package's published files (package.json,
-      // README, etc.), not build artifacts or static assets. Layer those back
-      // on so the runtime can find .next/, public/, and next.config.*.
-      cpSync(nextOut, join(deployDir, '.next'), { recursive: true });
+      run('pnpm', ['--filter', 'native', 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', appDir], { cwd: workdir });
+      // pnpm deploy only copies the package's published files. Layer the
+      // build output and runtime-relevant config/assets back on.
+      cpSync(nextOut, join(appDir, '.next'), { recursive: true });
       for (const dir of ['public', 'src']) {
         const src = join(workNative, dir);
-        if (existsSync(src)) cpSync(src, join(deployDir, dir), { recursive: true });
+        if (existsSync(src)) cpSync(src, join(appDir, dir), { recursive: true });
       }
       for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
         const src = join(workNative, cfg);
-        if (existsSync(src)) cpSync(src, join(deployDir, cfg));
+        if (existsSync(src)) cpSync(src, join(appDir, cfg));
       }
-      rmSync(workNative, { recursive: true, force: true });
-      renameSync(deployDir, workNative);
       // Strip dev-only / SCM noise that snuck through copyTree's filter.
       for (const junk of ['.git', '.gitignore', 'README.md', 'AGENTS.md', 'CLAUDE.md']) {
-        rmSync(join(workNative, junk), { recursive: true, force: true });
+        rmSync(join(appDir, junk), { recursive: true, force: true });
       }
+      // Write the FSN handler module. Mirrors the user-authored shape so the
+      // Electron main can dynamic-import it just like adapter-node's output.
+      writeFileSync(
+        join(appDir, 'fsn.handler.mjs'),
+        `import createNextServer from 'next';\n\nconst nextjs = createNextServer({\n  dev: false,\n  dir: import.meta.dirname,\n});\n\nawait nextjs.prepare();\n\nexport const handler = nextjs.getRequestHandler();\n`
+      );
+      rmSync(workNative, { recursive: true, force: true });
     }
     // Clear consumer-only files at workdir root (their package.json,
-    // fsn.config.js, pnpm-workspace.yaml, .gitignore, …) and any prior
-    // build output, but keep the artifacts the runtime needs:
-    //   - sveltekit: only 'build/' (adapter-node's output is self-contained;
-    //     its server deps are bundled inline by esbuild).
-    //   - nextjs:    'native/' (.next + public + src + package.json) plus
-    //     'node_modules/' (pnpm's isolated install — workdir/native/node_modules
-    //     is full of symlinks pointing up here, so removing it would break
-    //     `next` resolution at runtime).
-    const keepAtRoot = config.type === 'sveltekit'
-      ? new Set(['build'])
-      : new Set(['native']);
+    // fsn.config.js, pnpm-workspace.yaml, .gitignore, the pnpm-hoist
+    // node_modules, …) — only the unified app/ dir survives.
     for (const entry of readdirSync(workdir)) {
-      if (!keepAtRoot.has(entry)) {
+      if (entry !== 'app') {
         rmSync(join(workdir, entry), { recursive: true, force: true });
       }
     }
@@ -297,7 +295,7 @@ async function build() {
     // 4. Write the Electron main process
     writeFileSync(
       join(workdir, 'application.js'),
-      buildApplicationJs(basename(cwd), config.type)
+      buildApplicationJs(basename(cwd))
     );
 
     // 5. Write a package.json for the Electron app and install Electron +
@@ -385,50 +383,7 @@ function copyTree(src, dest, exclude = []) {
   }
 }
 
-function buildApplicationJs(projectName, framework) {
-  // Framework-specific snippet that initializes `runHandler` — a normalized
-  // (req, res) => Promise<void> wrapper around whatever the framework hands
-  // us. Both adapter-node's handler (Polka middleware) and Next's custom-
-  // server handler take a Node IncomingMessage + ServerResponse pair, so
-  // the Web↔Node shim below is shared.
-  const initBlock = framework === 'sveltekit' ? `
-const { pathToFileURL } = require('node:url');
-
-async function initHandler() {
-  // adapter-node's handler.js is ESM, so we need dynamic import.
-  const handlerUrl = pathToFileURL(path.join(__dirname, 'build', 'handler.js'));
-  const mod = await import(handlerUrl.href);
-  const handler = mod.handler;
-  return (req, res) => new Promise((resolve, reject) => {
-    res._endPromise.then(resolve, reject);
-    try {
-      handler(req, res, (err) => {
-        if (err) { reject(err); return; }
-        if (!res._done) {
-          res.statusCode = 404;
-          res.end('Not found');
-        }
-      });
-    } catch (err) {
-      reject(err);
-    }
-  });
-}` : `
-const { createRequire } = require('node:module');
-
-async function initHandler() {
-  // next is CJS; resolve it against the bundled native/ project so its
-  // own deps (react, react-dom, etc.) come from native/node_modules.
-  const nativeDir = path.join(__dirname, 'native');
-  const nativeRequire = createRequire(path.join(nativeDir, 'package.json'));
-  const next = nativeRequire('next');
-  const factory = next.default || next;
-  const nextApp = factory({ dev: false, dir: nativeDir });
-  await nextApp.prepare();
-  const handler = nextApp.getRequestHandler();
-  return (req, res) => Promise.resolve(handler(req, res)).then(() => res._endPromise);
-}`;
-
+function buildApplicationJs(projectName) {
   return `'use strict';
 
 // Electron main process. Intercepts every same-origin http request via
@@ -438,6 +393,7 @@ async function initHandler() {
 // import and call.
 
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { Readable } = require('node:stream');
 const { app, BrowserWindow, protocol, net } = require('electron');
 
@@ -582,16 +538,26 @@ function captureToResponse(res) {
     headers,
   });
 }
-${initBlock}
 
-let runHandler;
-const handlerReady = initHandler().then((fn) => { runHandler = fn; });
+// fsn.handler.mjs is generated by 'fsn build' alongside the framework's
+// runtime artifacts. It exports a single 'handler' whose signature matches
+// whichever framework is in use: a Polka middleware (adapter-node) or an
+// async (req, res) handler (next's getRequestHandler). The invocation logic
+// below covers both shapes without branching.
+let handler;
+const handlerReady = (async () => {
+  const handlerUrl = pathToFileURL(path.join(__dirname, 'app', 'fsn.handler.mjs'));
+  const mod = await import(handlerUrl.href);
+  handler = mod.handler;
+})();
 
 async function invokeHandler(webRequest, url) {
   await handlerReady;
   const req = toNodeRequest(webRequest, url);
   const res = new CaptureResponse();
-  await runHandler(req, res);
+  // fsn.handler.mjs always exposes a (req, res) => Promise<void> contract,
+  // so this is framework-agnostic.
+  await handler(req, res);
   return captureToResponse(res);
 }
 
