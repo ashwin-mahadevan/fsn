@@ -1,0 +1,46 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /packages/cli
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /examples/nextjs
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /examples/sveltekit
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dependencies:
+        patterns: ["*"]

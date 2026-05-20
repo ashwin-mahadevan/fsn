@@ -1,7 +1,13 @@
 {
   "name": "@fsn/monorepo",
   "repository": "git+https://github.com/ashwin-mahadevan/fsn.git",
+  "scripts": {
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm --filter @fsn.dev/cli publish --no-git-checks --access public"
+  },
   "devDependencies": {
+    "@changesets/cli": "^2.27.0",
     "@fsn.dev/cli": "workspace:*"
   }
 }

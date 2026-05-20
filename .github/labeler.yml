@@ -1,0 +1,28 @@
+cli:
+  - changed-files:
+    - any-glob-to-any-file: packages/cli/**
+
+nextjs:
+  - changed-files:
+    - any-glob-to-any-file: examples/nextjs/**
+
+sveltekit:
+  - changed-files:
+    - any-glob-to-any-file: examples/sveltekit/**
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file: .github/**
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - "**/*.md"
+      - "**/*.mdx"
+
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - "**/package.json"
+      - "**/pnpm-lock.yaml"
+      - ".changeset/**"

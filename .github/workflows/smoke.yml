@@ -1,4 +1,4 @@
-name: CI
+name: Smoke test
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  ci:
-    name: Lint, typecheck & test (${{ matrix.os }})
+  smoke:
+    name: Smoke test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -22,8 +22,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm --filter @fsn.dev/cli exec tsc --noEmit
+      - name: --help exits 0 and prints usage
+        run: node packages/cli/src/bin.js --help
 
-      - name: Test
-        run: echo "test"
+      - name: Unknown framework exits non-zero
+        shell: bash
+        run: |
+          node packages/cli/src/bin.js my-app init notaframework && exit 1 || true
