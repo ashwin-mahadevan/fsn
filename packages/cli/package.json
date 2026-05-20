@@ -16,6 +16,11 @@
   "engines": {
     "node": ">=22"
   },
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "commander": "^13.1.0",
+    "picocolors": "^1.1.1"
+  },
   "devDependencies": {
     "@types/node": "^25.9.0",
     "electron": "^42.1.0"

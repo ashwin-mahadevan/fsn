@@ -1,6 +1,7 @@
 import { readdir, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
-import { log, exists, run, renderTemplate } from './utils.js';
+import * as p from '@clack/prompts';
+import { exists, run, renderTemplate } from './utils.js';
 
 /**
  * @param {string} projectName
@@ -24,17 +25,13 @@ export default async function init(projectName, framework) {
   }
 
   await writeWorkspaceFiles(projectDir, projectName, framework);
-
-  log(`done. Next:`);
-  log(`  cd ${projectName}`);
-  log(`  pnpm install`);
-  log(`  pnpm build`);
 }
 
 /** @param {string} projectDir */
 async function scaffoldSveltekit(projectDir) {
   // sv create scaffolds into ./<dir>; we run it with cwd=projectDir so the
   // skeleton lands in projectDir/native.
+  p.log.step('Scaffolding SvelteKit project…');
   await run('pnpm', [
     'dlx',
     'sv@latest',
@@ -54,6 +51,7 @@ async function scaffoldSveltekit(projectDir) {
   // runnable Node server that the Electron main process can host — this is
   // the whole point of FSN: ship fullstack frameworks, not static exports.
   // `sv add` rewrites svelte.config.js and the package.json devDep for us.
+  p.log.step('Switching to adapter-node…');
   await run('pnpm', [
     'dlx',
     'sv@latest',
@@ -70,6 +68,7 @@ async function scaffoldSveltekit(projectDir) {
 async function scaffoldNextjs(projectDir) {
   // create-next-app doesn't accept a relative path with trailing components;
   // running it with cwd=projectDir lands the project in projectDir/native.
+  p.log.step('Scaffolding Next.js project…');
   await run('pnpm', [
     'dlx',
     'create-next-app@latest',
