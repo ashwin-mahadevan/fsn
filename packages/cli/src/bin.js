@@ -212,10 +212,31 @@ async function build() {
       'dist',
       '.git',
     ]);
+    // The consumer's pnpm-workspace.yaml may gate build scripts via
+    // onlyBuiltDependencies. In the isolated build workdir every package
+    // should be allowed to run its postinstall — drop that field.
+    const workWsYaml = join(workdir, 'pnpm-workspace.yaml');
+    if (existsSync(workWsYaml)) {
+      const stripped = readFileSync(workWsYaml, 'utf8')
+        .replace(/^onlyBuiltDependencies:[^\n]*(\n[ \t]+[^\n]+)*/gm, '')
+        .trimEnd() + '\n';
+      writeFileSync(workWsYaml, stripped);
+    }
     const workNative = join(workdir, 'native');
 
     // 2. Install + build the framework.
-    run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
+    // pnpm v10+ requires explicit build-script approval for new deps. Try the
+    // install; if it exits non-zero (ERR_PNPM_IGNORED_BUILDS), approve all
+    // pending scripts and retry once before giving up.
+    {
+      const installArgs = ['install', '--prefer-offline'];
+      let res = spawnSync('pnpm', installArgs, { stdio: 'inherit', shell: false, cwd: workNative });
+      if (res.status !== 0) {
+        spawnSync('pnpm', ['approve-builds', '--all'], { stdio: 'inherit', shell: false, cwd: workdir });
+        res = spawnSync('pnpm', installArgs, { stdio: 'inherit', shell: false, cwd: workNative });
+        if (res.status !== 0) throw new Error(`pnpm install --prefer-offline exited with code ${res.status}`);
+      }
+    }
     run('pnpm', ['build'], { cwd: workNative });
 
     // 3. Stage the framework's runtime artifacts under a single workdir/app/
