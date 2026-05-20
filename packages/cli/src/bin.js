@@ -1,6 +1,19 @@
 #!/usr/bin/env node
 
-import fsp from 'node:fs/promises';
+import {
+  access,
+  readdir,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+  rm,
+  rename,
+  cp,
+  symlink,
+  readlink,
+  copyFile,
+} from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -19,7 +32,7 @@ function log(...args) {
   process.stderr.write('[fsn] ' + args.join(' ') + '\n');
 }
 
-const exists = (p) => fsp.access(p).then(() => true, () => false);
+const exists = (p) => access(p).then(() => true, () => false);
 
 async function run(cmd, args, options = {}) {
   log('$', cmd, args.join(' '), options.cwd ? `(cwd=${options.cwd})` : '');
@@ -64,12 +77,12 @@ async function main() {
 async function init(projectName, framework) {
   const projectDir = resolve(projectName);
   if (await exists(projectDir)) {
-    const entries = await fsp.readdir(projectDir);
+    const entries = await readdir(projectDir);
     if (entries.length > 0) {
       throw new Error(`${projectDir} already exists and is not empty.`);
     }
   } else {
-    await fsp.mkdir(projectDir, { recursive: true });
+    await mkdir(projectDir, { recursive: true });
   }
 
   if (framework === 'sveltekit') {
@@ -145,16 +158,16 @@ async function scaffoldNextjs(projectDir) {
   // suppress postinstall scripts. Our parent already controls those via
   // `onlyBuiltDependencies`, and a nested workspace yaml confuses pnpm.
   const nestedWs = join(nativeDir, 'pnpm-workspace.yaml');
-  if (await exists(nestedWs)) await fsp.rm(nestedWs);
+  if (await exists(nestedWs)) await rm(nestedWs);
 }
 
 async function writeWorkspaceFiles(projectDir, projectName, framework) {
-  await fsp.writeFile(
+  await writeFile(
     join(projectDir, 'pnpm-workspace.yaml'),
     `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n`
   );
 
-  await fsp.writeFile(
+  await writeFile(
     join(projectDir, 'package.json'),
     JSON.stringify(
       {
@@ -173,12 +186,12 @@ async function writeWorkspaceFiles(projectDir, projectName, framework) {
     ) + '\n'
   );
 
-  await fsp.writeFile(
+  await writeFile(
     join(projectDir, 'fsn.config.js'),
     await renderTemplate('fsn.config.template.js', { $$framework: framework })
   );
 
-  await fsp.writeFile(
+  await writeFile(
     join(projectDir, '.gitignore'),
     `node_modules\ndist\n.DS_Store\n*.log\n`
   );
@@ -196,7 +209,7 @@ async function build() {
     throw new Error(`native/ directory not found in ${cwd}`);
   }
 
-  const workdir = await fsp.mkdtemp(join(tmpdir(), 'fsn-build-'));
+  const workdir = await mkdtemp(join(tmpdir(), 'fsn-build-'));
   log(`workdir: ${workdir}`);
 
   try {
@@ -218,10 +231,10 @@ async function build() {
     // should be allowed to run its postinstall — drop that field.
     const workWsYaml = join(workdir, 'pnpm-workspace.yaml');
     if (await exists(workWsYaml)) {
-      const stripped = (await fsp.readFile(workWsYaml, 'utf8'))
+      const stripped = (await readFile(workWsYaml, 'utf8'))
         .replace(/^onlyBuiltDependencies:[^\n]*(\n[ \t]+[^\n]+)*/gm, '')
         .trimEnd() + '\n';
-      await fsp.writeFile(workWsYaml, stripped);
+      await writeFile(workWsYaml, stripped);
     }
     const workNative = join(workdir, 'native');
 
@@ -248,22 +261,22 @@ async function build() {
       if (!await exists(adapterOut)) {
         throw new Error(`Expected adapter-node output at ${adapterOut} but didn't find it.`);
       }
-      await fsp.rename(adapterOut, appDir);
+      await rename(adapterOut, appDir);
       // adapter-node's handler.js is ESM. Mark the dir as ESM via a
       // package.json so Node skips the reparse-from-CJS perf warning, and
       // re-export the handler under our canonical name.
-      await fsp.writeFile(
+      await writeFile(
         join(appDir, 'package.json'),
         JSON.stringify({ type: 'module' }, null, 2) + '\n'
       );
       // Wrap adapter-node's Polka middleware so fsn.handler.mjs exports the
       // same (req, res) => Promise<void> shape that next's getRequestHandler
       // gives us — the Electron main never has to branch on framework.
-      await fsp.writeFile(
+      await writeFile(
         join(appDir, 'fsn.handler.mjs'),
         `import { handler as middleware } from './handler.js';\n\nexport const handler = (req, res) => new Promise((resolve, reject) => {\n  const done = (err) => (err ? reject(err) : resolve());\n  res.once('finish', () => done());\n  res.once('close', () => done());\n  try {\n    middleware(req, res, (err) => {\n      if (err) return done(err);\n      if (!res.writableEnded) {\n        res.statusCode = 404;\n        res.end('Not found');\n      }\n    });\n  } catch (err) {\n    done(err);\n  }\n});\n`
       );
-      await fsp.rm(workNative, { recursive: true, force: true });
+      await rm(workNative, { recursive: true, force: true });
     } else if (config.type === 'nextjs') {
       const nextOut = join(workNative, '.next');
       if (!await exists(nextOut)) {
@@ -277,38 +290,38 @@ async function build() {
       await run('pnpm', ['--filter', 'native', 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', appDir], { cwd: workdir });
       // pnpm deploy only copies the package's published files. Layer the
       // build output and runtime-relevant config/assets back on.
-      await fsp.cp(nextOut, join(appDir, '.next'), { recursive: true });
+      await cp(nextOut, join(appDir, '.next'), { recursive: true });
       for (const dir of ['public', 'src']) {
         const src = join(workNative, dir);
-        if (await exists(src)) await fsp.cp(src, join(appDir, dir), { recursive: true });
+        if (await exists(src)) await cp(src, join(appDir, dir), { recursive: true });
       }
       for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
         const src = join(workNative, cfg);
-        if (await exists(src)) await fsp.cp(src, join(appDir, cfg));
+        if (await exists(src)) await cp(src, join(appDir, cfg));
       }
       // Strip dev-only / SCM noise that snuck through copyTree's filter.
       for (const junk of ['.git', '.gitignore', 'README.md', 'AGENTS.md', 'CLAUDE.md']) {
-        await fsp.rm(join(appDir, junk), { recursive: true, force: true });
+        await rm(join(appDir, junk), { recursive: true, force: true });
       }
       // Write the FSN handler module. Mirrors the user-authored shape so the
       // Electron main can dynamic-import it just like adapter-node's output.
-      await fsp.writeFile(
+      await writeFile(
         join(appDir, 'fsn.handler.mjs'),
         `import createNextServer from 'next';\n\nconst nextjs = createNextServer({\n  dev: false,\n  dir: import.meta.dirname,\n});\n\nawait nextjs.prepare();\n\nexport const handler = nextjs.getRequestHandler();\n`
       );
-      await fsp.rm(workNative, { recursive: true, force: true });
+      await rm(workNative, { recursive: true, force: true });
     }
     // Clear consumer-only files at workdir root (their package.json,
     // fsn.config.js, pnpm-workspace.yaml, .gitignore, the pnpm-hoist
     // node_modules, …) — only the unified app/ dir survives.
-    for (const entry of await fsp.readdir(workdir)) {
+    for (const entry of await readdir(workdir)) {
       if (entry !== 'app') {
-        await fsp.rm(join(workdir, entry), { recursive: true, force: true });
+        await rm(join(workdir, entry), { recursive: true, force: true });
       }
     }
 
     // 4. Write the Electron main process
-    await fsp.writeFile(
+    await writeFile(
       join(workdir, 'application.js'),
       await renderTemplate('application.template.js', { $$projectName: JSON.stringify(basename(cwd)) })
     );
@@ -317,7 +330,7 @@ async function build() {
     //    @electron/packager. We use npm here (not pnpm) because the workdir
     //    is throwaway and npm doesn't gate Electron's post-install download.
     const appName = sanitizeAppName(basename(cwd));
-    await fsp.writeFile(
+    await writeFile(
       join(workdir, 'package.json'),
       JSON.stringify(
         {
@@ -349,9 +362,9 @@ async function build() {
     // 7. Copy result back to ./dist
     const projectDist = join(cwd, 'dist');
     if (await exists(projectDist)) {
-      await fsp.rm(projectDist, { recursive: true, force: true });
+      await rm(projectDist, { recursive: true, force: true });
     }
-    await fsp.cp(join(workdir, 'dist'), projectDist, { recursive: true });
+    await cp(join(workdir, 'dist'), projectDist, { recursive: true });
 
     log(`✓ Built native app at ${projectDist}`);
   } finally {
@@ -383,23 +396,23 @@ function sanitizeAppName(name) {
 
 async function copyTree(src, dest, exclude = []) {
   const skip = new Set(exclude);
-  await fsp.mkdir(dest, { recursive: true });
-  for (const entry of await fsp.readdir(src, { withFileTypes: true })) {
+  await mkdir(dest, { recursive: true });
+  for (const entry of await readdir(src, { withFileTypes: true })) {
     if (skip.has(entry.name)) continue;
     const s = join(src, entry.name);
     const d = join(dest, entry.name);
     if (entry.isDirectory()) {
       await copyTree(s, d, exclude);
     } else if (entry.isSymbolicLink()) {
-      await fsp.symlink(await fsp.readlink(s), d);
+      await symlink(await readlink(s), d);
     } else {
-      await fsp.copyFile(s, d);
+      await copyFile(s, d);
     }
   }
 }
 
 async function renderTemplate(name, vars) {
-  let src = await fsp.readFile(new URL('../assets/' + name, import.meta.url), 'utf8');
+  let src = await readFile(new URL('../assets/' + name, import.meta.url), 'utf8');
   for (const [placeholder, value] of Object.entries(vars)) {
     src = src.replaceAll(placeholder, value);
   }
