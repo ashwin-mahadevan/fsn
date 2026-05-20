@@ -166,6 +166,7 @@ export default async function build() {
   log(`✓ Built native app at ${projectDist}`);
 }
 
+/** @param {string} cwd */
 async function loadConfig(cwd) {
   const configPath = join(cwd, 'fsn.config.js');
   if (!await exists(configPath)) {
@@ -181,10 +182,16 @@ async function loadConfig(cwd) {
   return config;
 }
 
+/** @param {string} name */
 function sanitizeAppName(name) {
   return name.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'app';
 }
 
+/**
+ * @param {string} src
+ * @param {string} dest
+ * @param {string[]} exclude
+ */
 async function copyTree(src, dest, exclude = []) {
   const skip = new Set(exclude);
   await mkdir(dest, { recursive: true });

@@ -1,12 +1,19 @@
 import { access, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
+/** @param {...*} args */
 export function log(...args) {
   process.stderr.write('[fsn] ' + args.join(' ') + '\n');
 }
 
+/** @param {string} p */
 export const exists = (p) => access(p).then(() => true, () => false);
 
+/**
+ * @param {string} cmd
+ * @param {string[]} args
+ * @param {{ cwd?: string }} options
+ */
 export async function run(cmd, args, options = {}) {
   log('$', cmd, args.join(' '), options.cwd ? `(cwd=${options.cwd})` : '');
   const child = spawn(cmd, args, { stdio: 'inherit', shell: false, ...options });
@@ -19,6 +26,10 @@ export async function run(cmd, args, options = {}) {
   }
 }
 
+/**
+ * @param {string} name
+ * @param {Record<string, string>} vars
+ */
 export async function renderTemplate(name, vars) {
   let src = await readFile(new URL('../assets/' + name, import.meta.url), 'utf8');
   for (const [placeholder, value] of Object.entries(vars)) {

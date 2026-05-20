@@ -2,6 +2,10 @@ import { readdir, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
 import { log, exists, run, renderTemplate } from './utils.js';
 
+/**
+ * @param {string} projectName
+ * @param {string} framework
+ */
 export default async function init(projectName, framework) {
   const projectDir = resolve(projectName);
   if (await exists(projectDir)) {
@@ -27,6 +31,7 @@ export default async function init(projectName, framework) {
   log(`  pnpm build`);
 }
 
+/** @param {string} projectDir */
 async function scaffoldSveltekit(projectDir) {
   // sv create scaffolds into ./<dir>; we run it with cwd=projectDir so the
   // skeleton lands in projectDir/native.
@@ -61,6 +66,7 @@ async function scaffoldSveltekit(projectDir) {
   ]);
 }
 
+/** @param {string} projectDir */
 async function scaffoldNextjs(projectDir) {
   // create-next-app doesn't accept a relative path with trailing components;
   // running it with cwd=projectDir lands the project in projectDir/native.
@@ -89,6 +95,11 @@ async function scaffoldNextjs(projectDir) {
   if (await exists(nestedWs)) await rm(nestedWs);
 }
 
+/**
+ * @param {string} projectDir
+ * @param {string} projectName
+ * @param {string} framework
+ */
 async function writeWorkspaceFiles(projectDir, projectName, framework) {
   await writeFile(
     join(projectDir, 'pnpm-workspace.yaml'),
