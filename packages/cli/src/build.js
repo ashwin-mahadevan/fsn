@@ -2,7 +2,6 @@ import {
   readdir,
   mkdir,
   mkdtemp,
-  readFile,
   writeFile,
   rm,
   rename,
@@ -43,28 +42,10 @@ export default async function build() {
       'dist',
       '.git',
     ]);
-    // The consumer's pnpm-workspace.yaml may gate build scripts via
-    // onlyBuiltDependencies. In the isolated build workdir every package
-    // should be allowed to run its postinstall — drop that field.
-    const workWsYaml = join(workdir, 'pnpm-workspace.yaml');
-    if (await exists(workWsYaml)) {
-      const stripped = (await readFile(workWsYaml, 'utf8'))
-        .replace(/^onlyBuiltDependencies:[^\n]*(\n[ \t]+[^\n]+)*/gm, '')
-        .trimEnd() + '\n';
-      await writeFile(workWsYaml, stripped);
-    }
     const workNative = join(workdir, 'native');
 
     // 2. Install + build the framework.
-    // pnpm v10+ requires explicit build-script approval for new deps. Try the
-    // install; if it exits non-zero (ERR_PNPM_IGNORED_BUILDS), approve all
-    // pending scripts and retry once before giving up.
-    try {
-      await run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
-    } catch {
-      try { await run('pnpm', ['approve-builds', '--all'], { cwd: workdir }); } catch {}
-      await run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
-    }
+    await run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
     await run('pnpm', ['build'], { cwd: workNative });
 
     // 3. Stage the framework's runtime artifacts under a single workdir/app/
