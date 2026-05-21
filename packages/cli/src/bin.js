@@ -1,42 +1,75 @@
 #!/usr/bin/env node
 
+import { Command } from 'commander';
+import * as p from '@clack/prompts';
+import pc from 'picocolors';
 import build from './build.js';
 import init from './init.js';
 
-const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
+const program = new Command();
 
-const USAGE = `fsn — Full-Stack Native
+program
+  .name('fsn')
+  .description('Full-Stack Native — ship full-stack web apps as native desktop apps')
+  .version('0.0.0');
 
-Commands:
-  fsn <project-name> init <sveltekit|nextjs>   Scaffold a new FSN project.
-  fsn build                                    Build the current project into a native app.
-`;
+program
+  .command('init [project-name]')
+  .description('Scaffold a new FSN project')
+  .option('--sveltekit', 'use SvelteKit')
+  .option('--nextjs', 'use Next.js')
+  .action(async (projectName, opts) => {
+    p.intro(pc.bgCyan(pc.black(' fsn init ')));
 
-async function main() {
-  const argv = process.argv.slice(2);
+    const answers = await p.group(
+      {
+        name: () => {
+          if (projectName) return Promise.resolve(projectName);
+          return p.text({
+            message: 'Project name',
+            placeholder: 'my-app',
+            validate: (v) => (v.trim() ? undefined : 'Project name is required'),
+          });
+        },
+        framework: () => {
+          if (opts.sveltekit) return Promise.resolve('sveltekit');
+          if (opts.nextjs) return Promise.resolve('nextjs');
+          return p.select({
+            message: 'Framework',
+            options: [
+              { value: 'sveltekit', label: 'SvelteKit', hint: 'Svelte + adapter-node' },
+              { value: 'nextjs', label: 'Next.js', hint: 'React + App Router' },
+            ],
+          });
+        },
+      },
+      {
+        onCancel: () => {
+          p.cancel('Cancelled.');
+          process.exit(1);
+        },
+      }
+    );
 
-  if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
-    process.stdout.write(USAGE);
-    return;
-  }
+    await init(answers.name, answers.framework);
 
-  if (argv[0] === 'build' && argv.length === 1) {
-    return await build();
-  }
+    p.note(
+      `cd ${answers.name}\npnpm install\npnpm build`,
+      "What's next?"
+    );
+    p.outro(pc.green('Done!'));
+  });
 
-  if (argv.length === 3 && argv[1] === 'init') {
-    const [projectName, , framework] = argv;
-    if (!FRAMEWORKS.has(framework)) {
-      throw new Error(`Unknown framework "${framework}". Expected one of: ${[...FRAMEWORKS].join(', ')}`);
-    }
-    return await init(projectName, framework);
-  }
+program
+  .command('build')
+  .description('Build the current project into a native app')
+  .action(async () => {
+    p.intro(pc.bgCyan(pc.black(' fsn build ')));
+    await build();
+    p.outro(pc.green('Done!'));
+  });
 
-  process.stderr.write(USAGE);
-  process.exit(1);
-}
-
-main().catch((err) => {
-  process.stderr.write('[fsn] error: ' + (err && err.stack ? err.stack : String(err)) + '\n');
+program.parseAsync(process.argv).catch((err) => {
+  p.log.error(err.message || String(err));
   process.exit(1);
 });

@@ -13,7 +13,8 @@ import {
 import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { log, exists, run, renderTemplate } from './utils.js';
+import * as p from '@clack/prompts';
+import { exists, run, renderTemplate } from './utils.js';
 
 const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
 
@@ -26,12 +27,13 @@ export default async function build() {
   }
 
   const workdir = await mkdtemp(join(tmpdir(), 'fsn-build-'));
-  log(`workdir: ${workdir}`);
 
   // 1. Copy the whole project → workdir (skip node_modules, prior build
   //    output, and SCM noise). Bringing the project root along means pnpm
   //    picks up the consumer's pnpm-workspace.yaml — including its
   //    `allowBuilds` approvals — during the install in step 2.
+  const spinner = p.spinner();
+  spinner.start('Copying project to work directory…');
   await copyTree(cwd, workdir, [
     'node_modules',
     '.next',
@@ -41,10 +43,13 @@ export default async function build() {
     'dist',
     '.git',
   ]);
+  spinner.stop('Project copied');
   const workNative = join(workdir, 'native');
 
   // 2. Install + build the framework.
+  p.log.step('Installing dependencies…');
   await run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
+  p.log.step('Building framework…');
   await run('pnpm', ['build'], { cwd: workNative });
 
   // 3. Stage the framework's runtime artifacts under a single workdir/app/
@@ -84,6 +89,7 @@ export default async function build() {
     // require() once the tree is asar-bundled. `pnpm deploy` rewrites the
     // tree with all prod deps fully inlined and devDeps stripped, using
     // --node-linker=hoisted so node_modules is flat (no .pnpm subdir).
+    p.log.step('Staging production dependencies…');
     await run('pnpm', ['--filter', 'native', 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', appDir], { cwd: workdir });
     // pnpm deploy only copies the package's published files. Layer the
     // build output and runtime-relevant config/assets back on.
@@ -141,6 +147,7 @@ export default async function build() {
     ) + '\n'
   );
 
+  p.log.step('Installing Electron…');
   await run('npm', ['install', '--no-audit', '--no-fund', '--save-dev',
     'electron@latest',
     '@electron/packager@latest',
@@ -149,6 +156,7 @@ export default async function build() {
   // 6. Package the app
   const platform = process.platform === 'darwin' ? 'darwin'
     : process.platform === 'win32' ? 'win32' : 'linux';
+  p.log.step('Packaging native app…');
   await run('npx', ['--yes', '@electron/packager', '.', appName,
     '--out', 'dist',
     '--overwrite',
@@ -163,7 +171,7 @@ export default async function build() {
   }
   await cp(join(workdir, 'dist'), projectDist, { recursive: true });
 
-  log(`✓ Built native app at ${projectDist}`);
+  p.log.success(`Native app built at ${projectDist}`);
 }
 
 /** @param {string} cwd */

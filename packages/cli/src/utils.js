@@ -1,11 +1,6 @@
 import { access, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
-/** @param {...*} args */
-export function log(...args) {
-  process.stderr.write('[fsn] ' + args.join(' ') + '\n');
-}
-
 /** @param {string} p */
 export const exists = (p) => access(p).then(() => true, () => false);
 
@@ -15,7 +10,6 @@ export const exists = (p) => access(p).then(() => true, () => false);
  * @param {{ cwd?: string }} options
  */
 export async function run(cmd, args, options = {}) {
-  log('$', cmd, args.join(' '), options.cwd ? `(cwd=${options.cwd})` : '');
   const child = spawn(cmd, args, { stdio: 'inherit', shell: false, ...options });
   const code = await new Promise((resolve, reject) => {
     child.on('close', resolve);
