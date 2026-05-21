@@ -1,0 +1,31 @@
+name: Smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: Smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: --help exits 0 and prints usage
+        run: node packages/cli/src/bin.js --help
+
+      - name: Unknown framework exits non-zero
+        shell: bash
+        run: |
+          node packages/cli/src/bin.js my-app init notaframework && exit 1 || true
