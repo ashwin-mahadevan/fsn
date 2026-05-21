@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   writeFile,
+  readFile,
   rm,
   rename,
   cp,
@@ -10,7 +11,7 @@ import {
   readlink,
   copyFile,
 } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { log, exists, run, renderTemplate } from './utils.js';
@@ -20,6 +21,11 @@ const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
 export default async function build() {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
+
+  if ('hosts' in config) {
+    return buildMultiHost(config, cwd);
+  }
+
   const nativeDir = join(cwd, 'native');
   if (!await exists(nativeDir)) {
     throw new Error(`native/ directory not found in ${cwd}`);
@@ -174,12 +180,122 @@ async function loadConfig(cwd) {
   }
   const mod = await import(pathToFileURL(configPath).href);
   const config = mod.default || mod;
-  if (!config || !FRAMEWORKS.has(config.type)) {
+  if (!config) {
+    throw new Error(`fsn.config.js must default-export a Config object`);
+  }
+  if ('hosts' in config) {
+    if (typeof config.hosts !== 'object' || Object.keys(config.hosts).length === 0) {
+      throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to fsn.host.js paths`);
+    }
+    return config;
+  }
+  if (!FRAMEWORKS.has(config.type)) {
     throw new Error(
-      `fsn.config.js must default-export { type: 'sveltekit' | 'nextjs' }`
+      `fsn.config.js must default-export { type: 'sveltekit' | 'nextjs' } or { hosts: Record<string, string> }`
     );
   }
   return config;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-host build
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {{ hosts: Record<string, string> }} config
+ * @param {string} cwd
+ */
+async function buildMultiHost(config, cwd) {
+  const workdir = await mkdtemp(join(tmpdir(), 'fsn-build-'));
+  log(`workdir: ${workdir}`);
+
+  const appDir = join(workdir, 'app');
+  await mkdir(appDir, { recursive: true });
+
+  for (const [name, hostRelPath] of Object.entries(config.hosts)) {
+    const hostJsPath = resolve(cwd, hostRelPath);
+    const hostDir = dirname(hostJsPath);
+    const appHostDir = join(appDir, name);
+    await mkdir(appHostDir, { recursive: true });
+
+    const isNextjs    = await exists(join(hostDir, '.next'));
+    const isSvelteKit = await exists(join(hostDir, 'build', 'handler.js'));
+
+    if (isSvelteKit) {
+      // Copy adapter-node output. add package.json so Node treats it as ESM
+      // without the re-parse perf warning.
+      await cp(join(hostDir, 'build'), join(appHostDir, 'build'), { recursive: true });
+      await writeFile(
+        join(appHostDir, 'build', 'package.json'),
+        JSON.stringify({ type: 'module' }, null, 2) + '\n'
+      );
+    } else if (isNextjs) {
+      // pnpm deploy rewrites node_modules with all prod deps inlined and
+      // devDeps stripped, using --node-linker=hoisted for a flat layout so
+      // @electron/packager can copy it without broken pnpm store symlinks.
+      const { name: pkgName } = JSON.parse(
+        await readFile(join(hostDir, 'package.json'), 'utf8')
+      );
+      await run('pnpm', [
+        '--filter', pkgName,
+        'deploy', '--prod', '--legacy', '--config.node-linker=hoisted',
+        appHostDir,
+      ], { cwd });
+      await cp(join(hostDir, '.next'), join(appHostDir, '.next'), { recursive: true });
+      for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'tsconfig.json']) {
+        const src = join(hostDir, cfg);
+        if (await exists(src)) await copyFile(src, join(appHostDir, cfg));
+      }
+    } else {
+      throw new Error(
+        `Cannot detect framework for host "${name}" at ${hostDir}. ` +
+        `Run "fsn host ${name}" first, or ensure the framework has been built.`
+      );
+    }
+
+    // Copy the user's fsn.host.js into the staged directory.
+    await copyFile(hostJsPath, join(appHostDir, 'fsn.host.js'));
+  }
+
+  // Stage fsn.config.js so the main process can read hosts at runtime.
+  await copyFile(join(cwd, 'fsn.config.js'), join(appDir, 'fsn.config.js'));
+
+  // Write the multi-host Electron main (ESM, InProcessSocket-based).
+  await writeFile(
+    join(workdir, 'main.js'),
+    await readFile(new URL('../assets/application.multi-host.template.js', import.meta.url), 'utf8')
+  );
+
+  const appName = sanitizeAppName(basename(cwd));
+  await writeFile(
+    join(workdir, 'package.json'),
+    JSON.stringify(
+      { name: appName, version: '0.0.0', private: true, type: 'module', main: 'main.js' },
+      null, 2
+    ) + '\n'
+  );
+
+  await run('npm', ['install', '--no-audit', '--no-fund', '--save-dev',
+    'electron@latest',
+    '@electron/packager@latest',
+  ], { cwd: workdir });
+
+  const platform = process.platform === 'darwin' ? 'darwin'
+    : process.platform === 'win32' ? 'win32' : 'linux';
+  await run('npx', ['--yes', '@electron/packager', '.', appName,
+    '--out', 'dist',
+    '--overwrite',
+    '--platform', platform,
+    '--arch', process.arch,
+  ], { cwd: workdir });
+
+  const projectDist = join(cwd, 'dist');
+  if (await exists(projectDist)) {
+    await rm(projectDist, { recursive: true, force: true });
+  }
+  await cp(join(workdir, 'dist'), projectDist, { recursive: true });
+
+  log(`✓ Built native app at ${projectDist}`);
 }
 
 /** @param {string} name */
