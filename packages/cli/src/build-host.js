@@ -1,6 +1,6 @@
 import { join, dirname, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { log, exists, run } from './utils.js';
+import { loadConfig } from './config.js';
 
 /**
  * Build a single named host in the current FSN project.
@@ -11,14 +11,8 @@ import { log, exists, run } from './utils.js';
  */
 export default async function buildHost(name) {
   const cwd = process.cwd();
-  const configPath = join(cwd, 'fsn.config.js');
-  if (!await exists(configPath)) {
-    throw new Error(`fsn.config.js not found in ${cwd}`);
-  }
-
-  const mod = await import(pathToFileURL(configPath).href);
-  const config = mod.default || mod;
-  if (!config.hosts || typeof config.hosts !== 'object') {
+  const config = await loadConfig(cwd);
+  if (!('hosts' in config)) {
     throw new Error(`fsn.config.js must export { hosts: Record<string, string> } for multi-host projects`);
   }
 

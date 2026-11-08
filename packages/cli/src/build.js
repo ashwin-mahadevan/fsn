@@ -4,6 +4,7 @@ import {
   mkdtemp,
   writeFile,
   readFile,
+  lstat,
   rm,
   rename,
   cp,
@@ -13,10 +14,11 @@ import {
 } from 'node:fs/promises';
 import { join, basename, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
 import { log, exists, run, renderTemplate } from './utils.js';
+import { loadConfig } from './config.js';
+import { packageApp } from './package.js';
 
-const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
+const ESM_PACKAGE_JSON = JSON.stringify({ type: 'module' }, null, 2) + '\n';
 
 export default async function build() {
   const cwd = process.cwd();
@@ -68,10 +70,7 @@ export default async function build() {
     // adapter-node's handler.js is ESM. Mark the dir as ESM via a
     // package.json so Node skips the reparse-from-CJS perf warning, and
     // re-export the handler under our canonical name.
-    await writeFile(
-      join(appDir, 'package.json'),
-      JSON.stringify({ type: 'module' }, null, 2) + '\n'
-    );
+    await writeFile(join(appDir, 'package.json'), ESM_PACKAGE_JSON);
     // Wrap adapter-node's Polka middleware so fsn.handler.mjs exports the
     // same (req, res) => Promise<void> shape that next's getRequestHandler
     // gives us — the Electron main never has to branch on framework.
@@ -85,23 +84,7 @@ export default async function build() {
     if (!await exists(nextOut)) {
       throw new Error(`Expected next build output at ${nextOut} but didn't find it.`);
     }
-    // pnpm's isolated install leaves workdir/native/node_modules full of
-    // symlinks pointing up into workdir/node_modules/.pnpm — that breaks
-    // require() once the tree is asar-bundled. `pnpm deploy` rewrites the
-    // tree with all prod deps fully inlined and devDeps stripped, using
-    // --node-linker=hoisted so node_modules is flat (no .pnpm subdir).
-    await run('pnpm', ['--filter', 'native', 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', appDir], { cwd: workdir });
-    // pnpm deploy only copies the package's published files. Layer the
-    // build output and runtime-relevant config/assets back on.
-    await cp(nextOut, join(appDir, '.next'), { recursive: true });
-    for (const dir of ['public', 'src']) {
-      const src = join(workNative, dir);
-      if (await exists(src)) await cp(src, join(appDir, dir), { recursive: true });
-    }
-    for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
-      const src = join(workNative, cfg);
-      if (await exists(src)) await cp(src, join(appDir, cfg));
-    }
+    await stageNextjs(workNative, appDir, { filter: 'native', cwd: workdir });
     // Strip dev-only / SCM noise that snuck through copyTree's filter.
     for (const junk of ['.git', '.gitignore', 'README.md', 'AGENTS.md', 'CLAUDE.md']) {
       await rm(join(appDir, junk), { recursive: true, force: true });
@@ -129,72 +112,8 @@ export default async function build() {
     await renderTemplate('application.template.js', { $$projectName: JSON.stringify(basename(cwd)) })
   );
 
-  // 5. Write a package.json for the Electron app and install Electron +
-  //    @electron/packager. We use npm here (not pnpm) because the workdir
-  //    is throwaway and npm doesn't gate Electron's post-install download.
-  const appName = sanitizeAppName(basename(cwd));
-  await writeFile(
-    join(workdir, 'package.json'),
-    JSON.stringify(
-      {
-        name: appName,
-        version: '0.0.0',
-        private: true,
-        main: 'application.js',
-      },
-      null,
-      2
-    ) + '\n'
-  );
-
-  await run('npm', ['install', '--no-audit', '--no-fund', '--save-dev',
-    'electron@latest',
-    '@electron/packager@latest',
-  ], { cwd: workdir });
-
-  // 6. Package the app
-  const platform = process.platform === 'darwin' ? 'darwin'
-    : process.platform === 'win32' ? 'win32' : 'linux';
-  await run('npx', ['--yes', '@electron/packager', '.', appName,
-    '--out', 'dist',
-    '--overwrite',
-    '--platform', platform,
-    '--arch', process.arch,
-  ], { cwd: workdir });
-
-  // 7. Copy result back to ./dist
-  const projectDist = join(cwd, 'dist');
-  if (await exists(projectDist)) {
-    await rm(projectDist, { recursive: true, force: true });
-  }
-  await cp(join(workdir, 'dist'), projectDist, { recursive: true });
-
-  log(`✓ Built native app at ${projectDist}`);
-}
-
-/** @param {string} cwd */
-async function loadConfig(cwd) {
-  const configPath = join(cwd, 'fsn.config.js');
-  if (!await exists(configPath)) {
-    throw new Error(`fsn.config.js not found in ${cwd}`);
-  }
-  const mod = await import(pathToFileURL(configPath).href);
-  const config = mod.default || mod;
-  if (!config) {
-    throw new Error(`fsn.config.js must default-export a Config object`);
-  }
-  if ('hosts' in config) {
-    if (typeof config.hosts !== 'object' || Object.keys(config.hosts).length === 0) {
-      throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to fsn.host.js paths`);
-    }
-    return config;
-  }
-  if (!FRAMEWORKS.has(config.type)) {
-    throw new Error(
-      `fsn.config.js must default-export { type: 'sveltekit' | 'nextjs' } or { hosts: Record<string, string> }`
-    );
-  }
-  return config;
+  // 5. Package the app and copy it back to ./dist
+  await packageApp({ workdir, cwd, main: 'application.js' });
 }
 
 // ---------------------------------------------------------------------------
@@ -225,27 +144,12 @@ async function buildMultiHost(config, cwd) {
       // Copy adapter-node output. add package.json so Node treats it as ESM
       // without the re-parse perf warning.
       await cp(join(hostDir, 'build'), join(appHostDir, 'build'), { recursive: true });
-      await writeFile(
-        join(appHostDir, 'build', 'package.json'),
-        JSON.stringify({ type: 'module' }, null, 2) + '\n'
-      );
+      await writeFile(join(appHostDir, 'build', 'package.json'), ESM_PACKAGE_JSON);
     } else if (isNextjs) {
-      // pnpm deploy rewrites node_modules with all prod deps inlined and
-      // devDeps stripped, using --node-linker=hoisted for a flat layout so
-      // @electron/packager can copy it without broken pnpm store symlinks.
       const { name: pkgName } = JSON.parse(
         await readFile(join(hostDir, 'package.json'), 'utf8')
       );
-      await run('pnpm', [
-        '--filter', pkgName,
-        'deploy', '--prod', '--legacy', '--config.node-linker=hoisted',
-        appHostDir,
-      ], { cwd });
-      await cp(join(hostDir, '.next'), join(appHostDir, '.next'), { recursive: true });
-      for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'tsconfig.json']) {
-        const src = join(hostDir, cfg);
-        if (await exists(src)) await copyFile(src, join(appHostDir, cfg));
-      }
+      await stageNextjs(hostDir, appHostDir, { filter: pkgName, cwd });
     } else {
       throw new Error(
         `Cannot detect framework for host "${name}" at ${hostDir}. ` +
@@ -266,41 +170,43 @@ async function buildMultiHost(config, cwd) {
     await readFile(new URL('../assets/application.multi-host.template.js', import.meta.url), 'utf8')
   );
 
-  const appName = sanitizeAppName(basename(cwd));
-  await writeFile(
-    join(workdir, 'package.json'),
-    JSON.stringify(
-      { name: appName, version: '0.0.0', private: true, type: 'module', main: 'main.js' },
-      null, 2
-    ) + '\n'
-  );
-
-  await run('npm', ['install', '--no-audit', '--no-fund', '--save-dev',
-    'electron@latest',
-    '@electron/packager@latest',
-  ], { cwd: workdir });
-
-  const platform = process.platform === 'darwin' ? 'darwin'
-    : process.platform === 'win32' ? 'win32' : 'linux';
-  await run('npx', ['--yes', '@electron/packager', '.', appName,
-    '--out', 'dist',
-    '--overwrite',
-    '--platform', platform,
-    '--arch', process.arch,
-  ], { cwd: workdir });
-
-  const projectDist = join(cwd, 'dist');
-  if (await exists(projectDist)) {
-    await rm(projectDist, { recursive: true, force: true });
-  }
-  await cp(join(workdir, 'dist'), projectDist, { recursive: true });
-
-  log(`✓ Built native app at ${projectDist}`);
+  await packageApp({ workdir, cwd, main: 'main.js', esm: true });
 }
 
-/** @param {string} name */
-function sanitizeAppName(name) {
-  return name.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'app';
+/**
+ * Stage a built Next.js app into `dest` for packaging.
+ *
+ * pnpm's isolated install leaves node_modules full of symlinks into
+ * .pnpm/ — that breaks require() once the tree is asar-bundled. `pnpm deploy`
+ * rewrites the tree with all prod deps fully inlined and devDeps stripped,
+ * using --node-linker=hoisted so node_modules is flat (no .pnpm subdir).
+ * It only copies the package's published files, so the build output and
+ * runtime-relevant config/assets are layered back on afterwards.
+ *
+ * @param {string} srcDir  Directory containing the built Next.js package.
+ * @param {string} dest    Where to stage it.
+ * @param {{ filter: string, cwd: string }} options
+ *   `filter` is the package name for pnpm --filter; `cwd` is a directory
+ *   inside the pnpm workspace that contains it.
+ */
+async function stageNextjs(srcDir, dest, { filter, cwd }) {
+  await run('pnpm', ['--filter', filter, 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', dest], { cwd });
+  // Hoisted deploy leaves symlinks to sibling workspace packages in
+  // node_modules; once staged elsewhere they dangle and break packaging.
+  const nodeModules = join(dest, 'node_modules');
+  for (const entry of await readdir(nodeModules)) {
+    const p = join(nodeModules, entry);
+    if ((await lstat(p)).isSymbolicLink() && !await exists(p)) await rm(p);
+  }
+  await cp(join(srcDir, '.next'), join(dest, '.next'), { recursive: true });
+  for (const dir of ['public', 'src']) {
+    const src = join(srcDir, dir);
+    if (await exists(src)) await cp(src, join(dest, dir), { recursive: true });
+  }
+  for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
+    const src = join(srcDir, cfg);
+    if (await exists(src)) await cp(src, join(dest, cfg));
+  }
 }
 
 /**
