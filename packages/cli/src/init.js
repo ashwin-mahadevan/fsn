@@ -103,7 +103,10 @@ async function scaffoldNextjs(projectDir) {
 async function writeWorkspaceFiles(projectDir, projectName, framework) {
   await writeFile(
     join(projectDir, 'pnpm-workspace.yaml'),
-    `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n`
+    `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n` +
+      // Next.js pulls in sharp, whose build script pnpm 10+ refuses to run
+      // unless it's explicitly approved.
+      (framework === 'nextjs' ? `\nallowBuilds:\n  sharp: true\n` : '')
   );
 
   await writeFile(
