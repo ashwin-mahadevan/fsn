@@ -1,0 +1,13 @@
+{
+  "name": "multi-host",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "fsn build",
+    "host:sveltekit": "fsn host sveltekit",
+    "host:nextjs": "fsn host nextjs"
+  },
+  "devDependencies": {
+    "@fsn.dev/cli": "link:../../packages/cli"
+  }
+}
