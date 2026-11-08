@@ -2,6 +2,11 @@ sharedWorkspaceLockfile: false
 
 packages:
   - packages/*
+  - docs
 
 onlyBuiltDependencies:
   - electron
+
+allowBuilds:
+  sharp: true
+  esbuild: true
