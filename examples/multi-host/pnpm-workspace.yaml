@@ -1,3 +1,6 @@
 packages:
   - sveltekit
   - nextjs
+
+allowBuilds:
+  esbuild: true
