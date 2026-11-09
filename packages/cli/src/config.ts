@@ -3,8 +3,6 @@ import { pathToFileURL } from 'node:url';
 import { exists } from './utils.js';
 import type { Config } from './index.js';
 
-export const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
-
 /** Load and validate fsn.config.js from a project directory. */
 export async function loadConfig(cwd: string): Promise<Config> {
   const configPath = join(cwd, 'fsn.config.js');
@@ -16,16 +14,8 @@ export async function loadConfig(cwd: string): Promise<Config> {
   if (!config) {
     throw new Error(`fsn.config.js must default-export a Config object`);
   }
-  if ('hosts' in config) {
-    if (typeof config.hosts !== 'object' || Object.keys(config.hosts).length === 0) {
-      throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to fsn.host.js paths`);
-    }
-    return config;
-  }
-  if (!FRAMEWORKS.has(config.type)) {
-    throw new Error(
-      `fsn.config.js must default-export { type: 'sveltekit' | 'nextjs' } or { hosts: Record<string, string> }`
-    );
+  if (typeof config.hosts !== 'object' || config.hosts === null || Object.keys(config.hosts).length === 0) {
+    throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to fsn.host.js paths`);
   }
   return config;
 }

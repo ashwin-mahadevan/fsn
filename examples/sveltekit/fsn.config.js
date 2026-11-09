@@ -1,4 +1,6 @@
 /** @type {import('@fsn.dev/cli').Config} */
 export default {
-  type: 'sveltekit',
+  hosts: {
+    native: './native/fsn.host.js',
+  },
 };

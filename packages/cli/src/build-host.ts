@@ -12,10 +12,6 @@ import { loadConfig } from './config.js';
 export async function buildHost(name: string): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
-  if (!('hosts' in config)) {
-    throw new Error(`fsn.config.js must export { hosts: Record<string, string> } for multi-host projects`);
-  }
-
   const hostRelPath = config.hosts[name];
   if (!hostRelPath) {
     throw new Error(`Host "${name}" not found in fsn.config.js. Available: ${Object.keys(config.hosts).join(', ')}`);

@@ -1,6 +1,6 @@
 import { readdir, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
-import { log, exists, run, renderTemplate } from './utils.js';
+import { log, exists, run, readAsset } from './utils.js';
 
 export async function init(projectName: string, framework: string): Promise<void> {
   const projectDir = resolve(projectName);
@@ -119,7 +119,12 @@ async function writeWorkspaceFiles(projectDir: string, projectName: string, fram
 
   await writeFile(
     join(projectDir, 'fsn.config.js'),
-    await renderTemplate('fsn.config.template.js', { $$framework: framework })
+    `/** @type {import('@fsn.dev/cli').Config} */\nexport default {\n  hosts: {\n    native: './native/fsn.host.js',\n  },\n};\n`
+  );
+
+  await writeFile(
+    join(projectDir, 'native', 'fsn.host.js'),
+    await readAsset(`fsn.host.${framework}.js`)
   );
 
   await writeFile(

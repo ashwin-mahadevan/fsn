@@ -11,7 +11,7 @@ const USAGE = `fsn — Full-Stack Native
 Commands:
   fsn <project-name> init <sveltekit|nextjs>   Scaffold a new FSN project.
   fsn build                                    Build the current project into a native app.
-  fsn host <name>                              Build a single host in a multi-host project.
+  fsn host <name>                              Build a single host.
 `;
 
 async function main() {

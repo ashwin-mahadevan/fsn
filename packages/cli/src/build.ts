@@ -6,16 +6,14 @@ import {
   readFile,
   lstat,
   rm,
-  rename,
   cp,
-  symlink,
-  readlink,
   copyFile,
 } from 'node:fs/promises';
-import { join, basename, dirname, resolve } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { log, exists, run, renderTemplate } from './utils.js';
+import { log, exists, run, readAsset } from './utils.js';
 import { loadConfig } from './config.js';
+import { buildHost } from './build-host.js';
 import { packageApp } from './package.js';
 
 const ESM_PACKAGE_JSON = JSON.stringify({ type: 'module' }, null, 2) + '\n';
@@ -24,103 +22,11 @@ export async function build(): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
 
-  if ('hosts' in config) {
-    return buildMultiHost(config, cwd);
+  // Make sure every host has been built before staging them.
+  for (const name of Object.keys(config.hosts)) {
+    await buildHost(name);
   }
 
-  const nativeDir = join(cwd, 'native');
-  if (!await exists(nativeDir)) {
-    throw new Error(`native/ directory not found in ${cwd}`);
-  }
-
-  const workdir = await mkdtemp(join(tmpdir(), 'fsn-build-'));
-  log(`workdir: ${workdir}`);
-
-  // 1. Copy the whole project → workdir (skip node_modules, prior build
-  //    output, and SCM noise). Bringing the project root along means pnpm
-  //    picks up the consumer's pnpm-workspace.yaml — including its
-  //    `allowBuilds` approvals — during the install in step 2.
-  await copyTree(cwd, workdir, [
-    'node_modules',
-    '.next',
-    '.svelte-kit',
-    'build',
-    'out',
-    'dist',
-    '.git',
-  ]);
-  const workNative = join(workdir, 'native');
-
-  // 2. Install + build the framework.
-  await run('pnpm', ['install', '--prefer-offline'], { cwd: workNative });
-  await run('pnpm', ['build'], { cwd: workNative });
-
-  // 3. Stage the framework's runtime artifacts under a single workdir/app/
-  //    directory and drop a fsn.handler.mjs alongside them. The Electron
-  //    main only ever imports './app/fsn.handler.mjs' — every framework-
-  //    specific detail (which file exports the handler, where node_modules
-  //    lives) is confined to the handler module.
-  const appDir = join(workdir, 'app');
-  if (config.type === 'sveltekit') {
-    const adapterOut = join(workNative, 'build');
-    if (!await exists(adapterOut)) {
-      throw new Error(`Expected adapter-node output at ${adapterOut} but didn't find it.`);
-    }
-    await rename(adapterOut, appDir);
-    // adapter-node's handler.js is ESM. Mark the dir as ESM via a
-    // package.json so Node skips the reparse-from-CJS perf warning, and
-    // re-export the handler under our canonical name.
-    await writeFile(join(appDir, 'package.json'), ESM_PACKAGE_JSON);
-    // Wrap adapter-node's Polka middleware so fsn.handler.mjs exports the
-    // same (req, res) => Promise<void> shape that next's getRequestHandler
-    // gives us — the Electron main never has to branch on framework.
-    await writeFile(
-      join(appDir, 'fsn.handler.mjs'),
-      `import { handler as middleware } from './handler.js';\n\nexport const handler = (req, res) => new Promise((resolve, reject) => {\n  const done = (err) => (err ? reject(err) : resolve());\n  res.once('finish', () => done());\n  res.once('close', () => done());\n  try {\n    middleware(req, res, (err) => {\n      if (err) return done(err);\n      if (!res.writableEnded) {\n        res.statusCode = 404;\n        res.end('Not found');\n      }\n    });\n  } catch (err) {\n    done(err);\n  }\n});\n`
-    );
-    await rm(workNative, { recursive: true, force: true });
-  } else if (config.type === 'nextjs') {
-    const nextOut = join(workNative, '.next');
-    if (!await exists(nextOut)) {
-      throw new Error(`Expected next build output at ${nextOut} but didn't find it.`);
-    }
-    await stageNextjs(workNative, appDir, { filter: 'native', cwd: workdir });
-    // Strip dev-only / SCM noise that snuck through copyTree's filter.
-    for (const junk of ['.git', '.gitignore', 'README.md', 'AGENTS.md', 'CLAUDE.md']) {
-      await rm(join(appDir, junk), { recursive: true, force: true });
-    }
-    // Write the FSN handler module. Mirrors the user-authored shape so the
-    // Electron main can dynamic-import it just like adapter-node's output.
-    await writeFile(
-      join(appDir, 'fsn.handler.mjs'),
-      `import createNextServer from 'next';\n\nconst nextjs = createNextServer({\n  dev: false,\n  dir: import.meta.dirname,\n});\n\nawait nextjs.prepare();\n\nexport const handler = nextjs.getRequestHandler();\n`
-    );
-    await rm(workNative, { recursive: true, force: true });
-  }
-  // Clear consumer-only files at workdir root (their package.json,
-  // fsn.config.js, pnpm-workspace.yaml, .gitignore, the pnpm-hoist
-  // node_modules, …) — only the unified app/ dir survives.
-  for (const entry of await readdir(workdir)) {
-    if (entry !== 'app') {
-      await rm(join(workdir, entry), { recursive: true, force: true });
-    }
-  }
-
-  // 4. Write the Electron main process
-  await writeFile(
-    join(workdir, 'application.js'),
-    await renderTemplate('application.template.js', { $$projectName: JSON.stringify(basename(cwd)) })
-  );
-
-  // 5. Package the app and copy it back to ./dist
-  await packageApp({ workdir, cwd, main: 'application.js' });
-}
-
-// ---------------------------------------------------------------------------
-// Multi-host build
-// ---------------------------------------------------------------------------
-
-async function buildMultiHost(config: { hosts: Record<string, string> }, cwd: string): Promise<void> {
   const workdir = await mkdtemp(join(tmpdir(), 'fsn-build-'));
   log(`workdir: ${workdir}`);
 
@@ -160,13 +66,10 @@ async function buildMultiHost(config: { hosts: Record<string, string> }, cwd: st
   // Stage fsn.config.js so the main process can read hosts at runtime.
   await copyFile(join(cwd, 'fsn.config.js'), join(appDir, 'fsn.config.js'));
 
-  // Write the multi-host Electron main (ESM, InProcessSocket-based).
-  await writeFile(
-    join(workdir, 'main.js'),
-    await readFile(new URL('../assets/application.multi-host.template.js', import.meta.url), 'utf8')
-  );
+  // Write the Electron main (ESM, InProcessSocket-based).
+  await writeFile(join(workdir, 'main.js'), await readAsset('application.template.js'));
 
-  await packageApp({ workdir, cwd, main: 'main.js', esm: true });
+  await packageApp({ workdir, cwd, main: 'main.js' });
 }
 
 /**
@@ -206,22 +109,5 @@ async function stageNextjs(
   for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
     const src = join(srcDir, cfg);
     if (await exists(src)) await cp(src, join(dest, cfg));
-  }
-}
-
-async function copyTree(src: string, dest: string, exclude: string[] = []): Promise<void> {
-  const skip = new Set(exclude);
-  await mkdir(dest, { recursive: true });
-  for (const entry of await readdir(src, { withFileTypes: true })) {
-    if (skip.has(entry.name)) continue;
-    const s = join(src, entry.name);
-    const d = join(dest, entry.name);
-    if (entry.isDirectory()) {
-      await copyTree(s, d, exclude);
-    } else if (entry.isSymbolicLink()) {
-      await symlink(await readlink(s), d);
-    } else {
-      await copyFile(s, d);
-    }
   }
 }

@@ -1,3 +1,3 @@
-export type Config =
-  | { type: 'sveltekit' | 'nextjs' }
-  | { hosts: Record<string, string> };
+export type Config = {
+  hosts: Record<string, string>;
+};

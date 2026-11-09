@@ -18,19 +18,17 @@ function sanitizeAppName(name: string): string {
  * @param options.workdir  Directory containing `main` and `app/`.
  * @param options.cwd      The user's project directory.
  * @param options.main     Filename of the Electron main process in workdir.
- * @param options.esm      Whether `main` is an ES module.
  */
-export async function packageApp({ workdir, cwd, main, esm = false }: {
+export async function packageApp({ workdir, cwd, main }: {
   workdir: string;
   cwd: string;
   main: string;
-  esm?: boolean;
 }): Promise<void> {
   const appName = sanitizeAppName(basename(cwd));
   await writeFile(
     join(workdir, 'package.json'),
     JSON.stringify(
-      { name: appName, version: '0.0.0', private: true, ...(esm && { type: 'module' }), main },
+      { name: appName, version: '0.0.0', private: true, type: 'module', main },
       null,
       2
     ) + '\n'

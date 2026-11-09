@@ -19,10 +19,6 @@ export async function run(cmd: string, args: string[], options: { cwd?: string }
   }
 }
 
-export async function renderTemplate(name: string, vars: Record<string, string>): Promise<string> {
-  let src = await readFile(new URL('../assets/' + name, import.meta.url), 'utf8');
-  for (const [placeholder, value] of Object.entries(vars)) {
-    src = src.replaceAll(placeholder, value);
-  }
-  return src;
+export function readAsset(name: string): Promise<string> {
+  return readFile(new URL('../assets/' + name, import.meta.url), 'utf8');
 }
