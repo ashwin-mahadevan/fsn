@@ -20,7 +20,7 @@ import { packageApp } from './package.js';
 
 const ESM_PACKAGE_JSON = JSON.stringify({ type: 'module' }, null, 2) + '\n';
 
-export default async function build() {
+export default async function build(): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
 
@@ -120,11 +120,7 @@ export default async function build() {
 // Multi-host build
 // ---------------------------------------------------------------------------
 
-/**
- * @param {{ hosts: Record<string, string> }} config
- * @param {string} cwd
- */
-async function buildMultiHost(config, cwd) {
+async function buildMultiHost(config: { hosts: Record<string, string> }, cwd: string): Promise<void> {
   const workdir = await mkdtemp(join(tmpdir(), 'fsn-build-'));
   log(`workdir: ${workdir}`);
 
@@ -183,13 +179,17 @@ async function buildMultiHost(config, cwd) {
  * It only copies the package's published files, so the build output and
  * runtime-relevant config/assets are layered back on afterwards.
  *
- * @param {string} srcDir  Directory containing the built Next.js package.
- * @param {string} dest    Where to stage it.
- * @param {{ filter: string, cwd: string }} options
+ * @param srcDir  Directory containing the built Next.js package.
+ * @param dest    Where to stage it.
+ * @param options
  *   `filter` is the package name for pnpm --filter; `cwd` is a directory
  *   inside the pnpm workspace that contains it.
  */
-async function stageNextjs(srcDir, dest, { filter, cwd }) {
+async function stageNextjs(
+  srcDir: string,
+  dest: string,
+  { filter, cwd }: { filter: string; cwd: string }
+): Promise<void> {
   await run('pnpm', ['--filter', filter, 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', dest], { cwd });
   // Hoisted deploy leaves symlinks to sibling workspace packages in
   // node_modules; once staged elsewhere they dangle and break packaging.
@@ -209,12 +209,7 @@ async function stageNextjs(srcDir, dest, { filter, cwd }) {
   }
 }
 
-/**
- * @param {string} src
- * @param {string} dest
- * @param {string[]} exclude
- */
-async function copyTree(src, dest, exclude = []) {
+async function copyTree(src: string, dest: string, exclude: string[] = []): Promise<void> {
   const skip = new Set(exclude);
   await mkdir(dest, { recursive: true });
   for (const entry of await readdir(src, { withFileTypes: true })) {

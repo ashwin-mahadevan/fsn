@@ -1,23 +1,16 @@
 import { access, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
-/** @param {...*} args */
-export function log(...args) {
+export function log(...args: unknown[]): void {
   process.stderr.write('[fsn] ' + args.join(' ') + '\n');
 }
 
-/** @param {string} p */
-export const exists = (p) => access(p).then(() => true, () => false);
+export const exists = (p: string): Promise<boolean> => access(p).then(() => true, () => false);
 
-/**
- * @param {string} cmd
- * @param {string[]} args
- * @param {{ cwd?: string }} options
- */
-export async function run(cmd, args, options = {}) {
+export async function run(cmd: string, args: string[], options: { cwd?: string } = {}): Promise<void> {
   log('$', cmd, args.join(' '), options.cwd ? `(cwd=${options.cwd})` : '');
   const child = spawn(cmd, args, { stdio: 'inherit', shell: false, ...options });
-  const code = await new Promise((resolve, reject) => {
+  const code = await new Promise<number | null>((resolve, reject) => {
     child.on('close', resolve);
     child.on('error', reject);
   });
@@ -26,11 +19,7 @@ export async function run(cmd, args, options = {}) {
   }
 }
 
-/**
- * @param {string} name
- * @param {Record<string, string>} vars
- */
-export async function renderTemplate(name, vars) {
+export async function renderTemplate(name: string, vars: Record<string, string>): Promise<string> {
   let src = await readFile(new URL('../assets/' + name, import.meta.url), 'utf8');
   for (const [placeholder, value] of Object.entries(vars)) {
     src = src.replaceAll(placeholder, value);

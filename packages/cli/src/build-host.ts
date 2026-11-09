@@ -7,9 +7,9 @@ import { loadConfig } from './config.js';
  * Reads fsn.config.js to locate the host directory, installs dependencies
  * if needed, then runs `pnpm build`.
  *
- * @param {string} name  Key in config.hosts, e.g. "sveltekit"
+ * @param name  Key in config.hosts, e.g. "sveltekit"
  */
-export default async function buildHost(name) {
+export default async function buildHost(name: string): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
   if (!('hosts' in config)) {

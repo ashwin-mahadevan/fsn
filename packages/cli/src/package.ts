@@ -2,8 +2,7 @@ import { writeFile, rm, cp } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { log, exists, run } from './utils.js';
 
-/** @param {string} name */
-function sanitizeAppName(name) {
+function sanitizeAppName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'app';
 }
 
@@ -16,13 +15,17 @@ function sanitizeAppName(name) {
  * replaces <cwd>/dist with the result. We use npm here (not pnpm) because the
  * workdir is throwaway and npm doesn't gate Electron's post-install download.
  *
- * @param {object} options
- * @param {string} options.workdir  Directory containing `main` and `app/`.
- * @param {string} options.cwd      The user's project directory.
- * @param {string} options.main     Filename of the Electron main process in workdir.
- * @param {boolean} [options.esm]   Whether `main` is an ES module.
+ * @param options.workdir  Directory containing `main` and `app/`.
+ * @param options.cwd      The user's project directory.
+ * @param options.main     Filename of the Electron main process in workdir.
+ * @param options.esm      Whether `main` is an ES module.
  */
-export async function packageApp({ workdir, cwd, main, esm = false }) {
+export async function packageApp({ workdir, cwd, main, esm = false }: {
+  workdir: string;
+  cwd: string;
+  main: string;
+  esm?: boolean;
+}): Promise<void> {
   const appName = sanitizeAppName(basename(cwd));
   await writeFile(
     join(workdir, 'package.json'),

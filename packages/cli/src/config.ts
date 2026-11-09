@@ -1,16 +1,12 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { exists } from './utils.js';
+import type { Config } from './index.js';
 
 export const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
 
-/**
- * Load and validate fsn.config.js from a project directory.
- *
- * @param {string} cwd
- * @returns {Promise<import('./index.d.ts').Config>}
- */
-export async function loadConfig(cwd) {
+/** Load and validate fsn.config.js from a project directory. */
+export async function loadConfig(cwd: string): Promise<Config> {
   const configPath = join(cwd, 'fsn.config.js');
   if (!await exists(configPath)) {
     throw new Error(`fsn.config.js not found in ${cwd}`);

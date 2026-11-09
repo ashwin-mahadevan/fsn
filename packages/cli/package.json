@@ -4,20 +4,25 @@
   "license": "MIT",
   "version": "0.0.0",
   "type": "module",
-  "main": "./src/index.js",
-  "types": "./src/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
-    "fsn": "./src/bin.js"
+    "fsn": "./dist/bin.js"
   },
   "files": [
-    "src/",
+    "dist/",
     "assets/"
   ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc"
+  },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
     "@types/node": "^25.9.0",
+    "typescript": "^5.9.0",
     "electron": "^42.1.0"
   }
 }
