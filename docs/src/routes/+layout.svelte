@@ -10,6 +10,7 @@
 	<a href={resolve('/')} class="font-bold no-underline">FSN</a>
 	<nav class="flex gap-4 text-sm">
 		<a href={resolve('/cli')}>CLI</a>
+		<a href="https://github.com/ashwin-mahadevan/fsn" rel="external">GitHub</a>
 	</nav>
 </header>
 
