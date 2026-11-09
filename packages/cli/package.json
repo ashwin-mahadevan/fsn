@@ -2,6 +2,15 @@
   "name": "@fsn.dev/cli",
   "description": "FSN: Full-Stack Native. Use any full-stack framework to create a native app!",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashwin-mahadevan/fsn.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://fsn.dev",
+  "publishConfig": {
+    "access": "public"
+  },
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,6 +32,7 @@
   "devDependencies": {
     "@types/node": "^25.9.0",
     "typescript": "^5.9.0",
-    "electron": "^42.1.0"
+    "@electron/packager": "20.3.0",
+    "electron": "45.2.3"
   }
 }

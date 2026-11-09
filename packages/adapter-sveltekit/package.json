@@ -2,6 +2,15 @@
   "name": "@fsn.dev/adapter-sveltekit",
   "description": "SvelteKit adapter for FSN: serves your app from inside a native app's main process.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashwin-mahadevan/fsn.git",
+    "directory": "packages/adapter-sveltekit"
+  },
+  "homepage": "https://fsn.dev",
+  "publishConfig": {
+    "access": "public"
+  },
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
