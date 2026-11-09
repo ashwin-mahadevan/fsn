@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { build } from './build.js';
-import { buildHost } from './build-host.js';
 import { init } from './init.js';
 
 const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
@@ -14,7 +13,6 @@ Commands:
                                                --project defaults to "." (must be empty),
                                                --framework defaults to nextjs.
   fsn build                                    Build the current project into a native app.
-  fsn host <name>                              Build a single host.
 `;
 
 try {
@@ -22,8 +20,6 @@ try {
     process.stdout.write(USAGE);
   } else if (process.argv[2] === 'build' && process.argv.length === 3) {
     await build();
-  } else if (process.argv[2] === 'host' && process.argv.length === 4) {
-    await buildHost(process.argv[3]);
   } else if (process.argv[2] === 'init') {
     let project = '.';
     let framework = 'nextjs';
