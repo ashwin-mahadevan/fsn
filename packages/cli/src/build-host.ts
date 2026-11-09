@@ -9,7 +9,7 @@ import { loadConfig } from './config.js';
  *
  * @param name  Key in config.hosts, e.g. "sveltekit"
  */
-export default async function buildHost(name: string): Promise<void> {
+export async function buildHost(name: string): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
   if (!('hosts' in config)) {

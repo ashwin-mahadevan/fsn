@@ -20,7 +20,7 @@ import { packageApp } from './package.js';
 
 const ESM_PACKAGE_JSON = JSON.stringify({ type: 'module' }, null, 2) + '\n';
 
-export default async function build(): Promise<void> {
+export async function build(): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
 

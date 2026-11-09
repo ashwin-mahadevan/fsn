@@ -2,7 +2,7 @@ import { readdir, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
 import { log, exists, run, renderTemplate } from './utils.js';
 
-export default async function init(projectName: string, framework: string): Promise<void> {
+export async function init(projectName: string, framework: string): Promise<void> {
   const projectDir = resolve(projectName);
   if (await exists(projectDir)) {
     const entries = await readdir(projectDir);

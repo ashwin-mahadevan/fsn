@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import build from './build.js';
-import buildHost from './build-host.js';
-import init from './init.js';
+import { build } from './build.js';
+import { buildHost } from './build-host.js';
+import { init } from './init.js';
 
 const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
 
