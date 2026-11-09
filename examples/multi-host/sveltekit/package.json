@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@sveltejs/adapter-node": "^5.2.0",
+    "@fsn.dev/adapter-sveltekit": "link:../../../packages/adapter-sveltekit",
     "@sveltejs/kit": "^2.16.0",
     "svelte": "^5.0.0",
     "vite": "^6.0.0"

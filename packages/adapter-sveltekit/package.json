@@ -1,0 +1,31 @@
+{
+  "name": "@fsn.dev/adapter-sveltekit",
+  "description": "SvelteKit adapter for FSN: serves your app from inside a native app's main process.",
+  "license": "MIT",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "files/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "rolldown": "^1.2.0"
+  },
+  "peerDependencies": {
+    "@sveltejs/kit": "^2.0.0 || ^3.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "^2.70.0",
+    "@types/node": "^25.9.0",
+    "typescript": "^5.9.0"
+  }
+}

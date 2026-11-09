@@ -1,4 +1,4 @@
-import { readdir, mkdir, writeFile, rm } from 'node:fs/promises';
+import { readdir, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
 import { log, exists, run, readAsset } from './utils.js';
 
@@ -19,10 +19,10 @@ export async function init(projectName: string, framework: string): Promise<void
     await scaffoldNextjs(projectDir);
   }
 
-  await writeWorkspaceFiles(projectDir, projectName, framework);
+  await writeWorkspaceFiles(projectDir, framework);
 
   log(`done. Next:`);
-  log(`  cd ${projectName}`);
+  if (projectDir !== process.cwd()) log(`  cd ${projectName}`);
   log(`  pnpm install`);
   log(`  pnpm build`);
 }
@@ -43,22 +43,33 @@ async function scaffoldSveltekit(projectDir: string): Promise<void> {
     '--no-download-check',
   ], { cwd: projectDir });
 
+  // Swap the default adapter-auto for FSN's adapter, which builds the app
+  // into a host the Electron main process calls in-process — this is the
+  // whole point of FSN: ship fullstack frameworks, not static exports.
   const nativeDir = join(projectDir, 'native');
 
-  // Swap the default adapter-auto for adapter-node so `pnpm build` emits a
-  // runnable Node server that the Electron main process can host — this is
-  // the whole point of FSN: ship fullstack frameworks, not static exports.
-  // `sv add` rewrites svelte.config.js and the package.json devDep for us.
-  await run('pnpm', [
-    'dlx',
-    'sv@latest',
-    'add',
-    'sveltekit-adapter=adapter:node',
-    '-C', nativeDir,
-    '--no-install',
-    '--no-git-check',
-    '--no-download-check',
-  ]);
+  // Newer sv templates put the kit config in vite.config.ts; older ones use
+  // svelte.config.js. Patch whichever imports adapter-auto.
+  let patched = false;
+  for (const file of ['svelte.config.js', 'vite.config.ts', 'vite.config.js']) {
+    const configPath = join(nativeDir, file);
+    if (!await exists(configPath)) continue;
+    const source = await readFile(configPath, 'utf8');
+    if (!source.includes(`'@sveltejs/adapter-auto'`)) continue;
+    await writeFile(configPath, source.replace(`'@sveltejs/adapter-auto'`, `'@fsn.dev/adapter-sveltekit'`));
+    patched = true;
+  }
+  if (!patched) {
+    throw new Error(`Couldn't find the @sveltejs/adapter-auto import in ${nativeDir} to replace.`);
+  }
+
+  const pkgPath = join(nativeDir, 'package.json');
+  const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
+  delete pkg.devDependencies['@sveltejs/adapter-auto'];
+  pkg.devDependencies['@fsn.dev/adapter-sveltekit'] = '*';
+  await writeFile(pkgPath, JSON.stringify(pkg, null, '\t') + '\n');
+
+  await removeNestedWorkspace(nativeDir);
 }
 
 async function scaffoldNextjs(projectDir: string): Promise<void> {
@@ -82,27 +93,33 @@ async function scaffoldNextjs(projectDir: string): Promise<void> {
 
   const nativeDir = join(projectDir, 'native');
 
-  // create-next-app drops its own pnpm-workspace.yaml inside the package to
-  // suppress postinstall scripts. Our parent already controls those via
-  // `onlyBuiltDependencies`, and a nested workspace yaml confuses pnpm.
+  await removeNestedWorkspace(nativeDir);
+}
+
+/**
+ * create-next-app and sv both drop a pnpm-workspace.yaml inside the package
+ * to configure build scripts. Our parent workspace already controls those via
+ * `onlyBuiltDependencies`, and a nested workspace yaml confuses pnpm.
+ */
+async function removeNestedWorkspace(nativeDir: string): Promise<void> {
   const nestedWs = join(nativeDir, 'pnpm-workspace.yaml');
   if (await exists(nestedWs)) await rm(nestedWs);
 }
 
-async function writeWorkspaceFiles(projectDir: string, projectName: string, framework: string): Promise<void> {
+async function writeWorkspaceFiles(projectDir: string, framework: string): Promise<void> {
   await writeFile(
     join(projectDir, 'pnpm-workspace.yaml'),
-    `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n` +
-      // Next.js pulls in sharp, whose build script pnpm 10+ refuses to run
-      // unless it's explicitly approved.
-      (framework === 'nextjs' ? `\nallowBuilds:\n  sharp: true\n` : '')
+    // Both templates pull in sharp (Next.js directly, SvelteKit via
+    // enhanced-img), whose build script pnpm 10+ refuses to run unless it's
+    // explicitly approved.
+    `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n\nallowBuilds:\n  sharp: true\n`
   );
 
   await writeFile(
     join(projectDir, 'package.json'),
     JSON.stringify(
       {
-        name: basename(projectName),
+        name: basename(projectDir),
         private: true,
         version: '0.0.0',
         scripts: {

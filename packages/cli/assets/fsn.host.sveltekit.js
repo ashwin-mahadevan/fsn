@@ -1,7 +1,3 @@
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { handler } = await import(pathToFileURL(path.join(__dirname, 'build', 'handler.js')).href);
-
-export default { handler };
+// FSN host for SvelteKit. `build/` is emitted by @fsn.dev/adapter-sveltekit
+// and default-exports { fetch(request: Request): Promise<Response> }.
+export { default } from './build/index.js';

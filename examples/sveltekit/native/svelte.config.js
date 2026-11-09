@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-node';
+import adapter from '@fsn.dev/adapter-sveltekit';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = { kit: { adapter: adapter() } };

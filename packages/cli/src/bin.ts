@@ -9,40 +9,45 @@ const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
 const USAGE = `fsn — Full-Stack Native
 
 Commands:
-  fsn <project-name> init <sveltekit|nextjs>   Scaffold a new FSN project.
+  fsn init [--project <dir>] [--framework <sveltekit|nextjs>]
+                                               Scaffold a new FSN project.
+                                               --project defaults to "." (must be empty),
+                                               --framework defaults to nextjs.
   fsn build                                    Build the current project into a native app.
   fsn host <name>                              Build a single host.
 `;
 
-async function main() {
-  const argv = process.argv.slice(2);
-
-  if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
+try {
+  if (process.argv[2] === '--help' || process.argv[2] === '-h' || process.argv.length === 2) {
     process.stdout.write(USAGE);
-    return;
-  }
-
-  if (argv[0] === 'build' && argv.length === 1) {
-    return await build();
-  }
-
-  if (argv[0] === 'host' && argv.length === 2) {
-    return await buildHost(argv[1]);
-  }
-
-  if (argv.length === 3 && argv[1] === 'init') {
-    const [projectName, , framework] = argv;
+  } else if (process.argv[2] === 'build' && process.argv.length === 3) {
+    await build();
+  } else if (process.argv[2] === 'host' && process.argv.length === 4) {
+    await buildHost(process.argv[3]);
+  } else if (process.argv[2] === 'init') {
+    let project = '.';
+    let framework = 'nextjs';
+    for (let i = 3; i < process.argv.length; i += 2) {
+      const flag = process.argv[i];
+      if (flag !== '--project' && flag !== '--framework') {
+        throw new Error(`Unknown argument "${flag}".\n\n${USAGE}`);
+      }
+      const value = process.argv[i + 1];
+      if (value === undefined) {
+        throw new Error(`Missing value for ${flag}.`);
+      }
+      if (flag === '--project') project = value;
+      else framework = value;
+    }
     if (!FRAMEWORKS.has(framework)) {
       throw new Error(`Unknown framework "${framework}". Expected one of: ${[...FRAMEWORKS].join(', ')}`);
     }
-    return await init(projectName, framework);
+    await init(project, framework);
+  } else {
+    process.stderr.write(USAGE);
+    process.exit(1);
   }
-
-  process.stderr.write(USAGE);
+} catch (err) {
+  process.stderr.write('[fsn] error: ' + (err instanceof Error && err.stack ? err.stack : String(err)) + '\n');
   process.exit(1);
 }
-
-main().catch((err) => {
-  process.stderr.write('[fsn] error: ' + (err && err.stack ? err.stack : String(err)) + '\n');
-  process.exit(1);
-});

@@ -1,64 +1,8 @@
 import { app, BrowserWindow, protocol, net } from 'electron';
-import http from 'node:http';
-import { Duplex, Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-// ---------------------------------------------------------------------------
-// InProcessSocket — a Duplex that satisfies net.Socket's interface so that
-// Node's http.Server and http.request treat it as a real connection.
-// No OS socket, no port, not visible to any other process.
-// ---------------------------------------------------------------------------
-class InProcessSocket extends Duplex {
-  constructor() {
-    super({ allowHalfOpen: true });
-    this._peer = null;
-    this.connecting  = false;
-    this.pending     = false;
-    this.encrypted   = false;
-    this.remoteAddress = '127.0.0.1';
-    this.remotePort    = 0;
-    this.localAddress  = '127.0.0.1';
-    this.localPort     = 0;
-    this.bytesRead     = 0;
-    this.bytesWritten  = 0;
-  }
-
-  _read() {}
-
-  _write(chunk, _enc, cb) {
-    this.bytesWritten += chunk.length;
-    this._peer.push(chunk);
-    cb();
-  }
-
-  setKeepAlive() { return this; }
-  setNoDelay()   { return this; }
-  setTimeout()   { return this; }
-  ref()          { return this; }
-  unref()        { return this; }
-  address()      { return { address: '127.0.0.1', family: 'IPv4', port: 0 }; }
-
-  destroySoon() {
-    if (this.writable) this.end();
-    if (this.writableFinished) this.destroy();
-    else this.once('finish', () => this.destroy());
-  }
-}
-
-function createSocketPair() {
-  const a = new InProcessSocket();
-  const b = new InProcessSocket();
-  a._peer = b;
-  b._peer = a;
-  a.on('finish', () => b.push(null));
-  b.on('finish', () => a.push(null));
-  return [a, b];
-}
-
-// ---------------------------------------------------------------------------
-// Bootstrap
-// ---------------------------------------------------------------------------
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 app.whenReady().then(async () => {
   // fsn build stages everything under app/ alongside this file.
@@ -66,68 +10,62 @@ app.whenReady().then(async () => {
   const configPath = path.join(appDir, 'fsn.config.js');
   const { default: config } = await import(pathToFileURL(configPath).href);
 
-  const servers = new Map();
+  // Where hosts may write at runtime (the app bundle itself is read-only).
+  process.env.FSN_DATA_DIR = app.getPath('userData');
 
-  for (const [name, hostRelPath] of Object.entries(config.hosts)) {
-    // Tell adapter-node (SvelteKit) the canonical origin before importing so
-    // its CSRF check and URL construction use the right value.
-    process.env.ORIGIN = `http://${name}.localhost`;
+  const hosts = new Map();
+  const hostFor = (hostname) =>
+    hostname.endsWith('.localhost') ? hosts.get(hostname.slice(0, -'.localhost'.length)) : undefined;
 
-    const hostAbsPath = path.resolve(appDir, hostRelPath);
-    const { default: hostConfig } = await import(pathToFileURL(hostAbsPath).href);
-    const { handler } = hostConfig;
+  // Server code fetching its own origin (e.g. Next.js fetching the target of
+  // a server action's redirect()) runs in this process, where requests don't
+  // pass through protocol.handle. Send those to the host in-process as well.
+  // Installed before hosts load so frameworks that wrap fetch wrap this one.
+  const nodeFetch = globalThis.fetch;
+  globalThis.fetch = async function fetch(input, init) {
+    const href = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+    const url = new URL(href);
+    const host = hostFor(url.hostname);
+    if (!host) return nodeFetch(input, init);
 
-    const server = http.createServer((req, res) => {
-      handler(req, res, () => {
-        if (!res.headersSent) {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('Not found');
-        }
-      });
-    });
-    servers.set(name, server);
+    const request = new Request(input, init);
+    // Hosts are only served over http; server code may assume https.
+    url.protocol = 'http:';
+    const response = await host.fetch(new Request(url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      duplex: 'half',
+      redirect: request.redirect,
+      signal: request.signal,
+    }));
+
+    const location = response.headers.get('location');
+    if (request.redirect !== 'follow' || !REDIRECT_STATUSES.has(response.status) || !location) {
+      return response;
+    }
+    // Follow redirects like fetch would; 303 (and 301/302 for POST) become GET.
+    const keepMethod = response.status === 307 || response.status === 308 ||
+      (request.method !== 'POST' && response.status !== 303);
+    return globalThis.fetch(new URL(location, url), keepMethod ? {
+      method: request.method, headers: request.headers, body: request.body, duplex: 'half',
+    } : { headers: request.headers });
+  };
+
+  // fsn build stages each host at app/<name>/fsn.host.js, which
+  // default-exports { fetch(request) => Response }.
+  for (const name of Object.keys(config.hosts)) {
+    const hostPath = path.join(appDir, name, 'fsn.host.js');
+    const { default: host } = await import(pathToFileURL(hostPath).href);
+    hosts.set(name, host);
   }
 
-  protocol.handle('http', async (request) => {
-    const url = new URL(request.url);
-
-    if (!url.hostname.endsWith('.localhost')) {
-      return net.fetch(request, { bypassCustomProtocolHandlers: true });
-    }
-
-    const name = url.hostname.replace(/\.localhost$/, '');
-    const server = servers.get(name);
-
-    if (!server) {
-      return net.fetch(request, { bypassCustomProtocolHandlers: true });
-    }
-
-    return new Promise((resolve, reject) => {
-      const [serverSocket, clientSocket] = createSocketPair();
-      server.emit('connection', serverSocket);
-
-      const nodeReq = http.request({
-        createConnection: (_opts, cb) => { process.nextTick(cb, null, clientSocket); return clientSocket; },
-        method:  request.method,
-        path:    url.pathname + url.search,
-        headers: Object.fromEntries(request.headers),
-      }, (nodeResponse) => {
-        const headers = new Headers();
-        for (const [k, v] of Object.entries(nodeResponse.headers)) {
-          if (Array.isArray(v)) v.forEach(vv => headers.append(k, vv));
-          else if (v != null) headers.set(k, v);
-        }
-        resolve(new Response(Readable.toWeb(nodeResponse), {
-          status: nodeResponse.statusCode ?? 200,
-          headers,
-        }));
-      });
-
-      nodeReq.on('error', reject);
-
-      if (request.body) Readable.fromWeb(request.body).pipe(nodeReq);
-      else nodeReq.end();
-    });
+  // Requests to http://<name>.localhost go straight to that host in-process:
+  // no port, no socket, not reachable from any other process.
+  protocol.handle('http', (request) => {
+    const host = hostFor(new URL(request.url).hostname);
+    if (!host) return net.fetch(request, { bypassCustomProtocolHandlers: true });
+    return host.fetch(request);
   });
 
   for (const name of Object.keys(config.hosts)) {

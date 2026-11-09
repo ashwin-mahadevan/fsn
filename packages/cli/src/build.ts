@@ -1,22 +1,10 @@
-import {
-  readdir,
-  mkdir,
-  mkdtemp,
-  writeFile,
-  readFile,
-  lstat,
-  rm,
-  cp,
-  copyFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, readdir, lstat, rm, cp, copyFile } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { log, exists, run, readAsset } from './utils.js';
 import { loadConfig } from './config.js';
 import { buildHost } from './build-host.js';
 import { packageApp } from './package.js';
-
-const ESM_PACKAGE_JSON = JSON.stringify({ type: 'module' }, null, 2) + '\n';
 
 export async function build(): Promise<void> {
   const cwd = process.cwd();
@@ -39,75 +27,88 @@ export async function build(): Promise<void> {
     const appHostDir = join(appDir, name);
     await mkdir(appHostDir, { recursive: true });
 
-    const isNextjs    = await exists(join(hostDir, '.next'));
-    const isSvelteKit = await exists(join(hostDir, 'build', 'handler.js'));
+    const hostPkg = JSON.parse(await readFile(join(hostDir, 'package.json'), 'utf8'));
+    const hostDeps = { ...hostPkg.dependencies, ...hostPkg.devDependencies };
+    const isSvelteKit = '@sveltejs/kit' in hostDeps;
+    const isNextjs    = 'next' in hostDeps;
 
-    if (isSvelteKit) {
-      // Copy adapter-node output. add package.json so Node treats it as ESM
-      // without the re-parse perf warning.
-      await cp(join(hostDir, 'build'), join(appHostDir, 'build'), { recursive: true });
-      await writeFile(join(appHostDir, 'build', 'package.json'), ESM_PACKAGE_JSON);
-    } else if (isNextjs) {
-      const { name: pkgName } = JSON.parse(
-        await readFile(join(hostDir, 'package.json'), 'utf8')
-      );
-      await stageNextjs(hostDir, appHostDir, { filter: pkgName, cwd });
-    } else {
+    if (!isSvelteKit && !isNextjs) {
       throw new Error(
-        `Cannot detect framework for host "${name}" at ${hostDir}. ` +
-        `Run "fsn host ${name}" first, or ensure the framework has been built.`
+        `Cannot detect framework for host "${name}" at ${hostDir}: ` +
+        `expected @sveltejs/kit or next in its package.json.`
       );
     }
 
-    // Copy the user's fsn.host.js into the staged directory.
+    // Production dependencies (only `dependencies`, flattened).
+    await deployProd(appHostDir, { filter: hostPkg.name, cwd });
+
+    if (isSvelteKit) {
+      // @fsn.dev/adapter-sveltekit's build/: the server bundled with its
+      // devDependencies, plus client assets and prerendered pages.
+      const buildDir = join(hostDir, 'build');
+      if (!await exists(join(buildDir, 'index.js'))) {
+        throw new Error(
+          `Host "${name}" has no build/index.js. Is @fsn.dev/adapter-sveltekit ` +
+          `its SvelteKit adapter?`
+        );
+      }
+      await cp(buildDir, join(appHostDir, 'build'), { recursive: true });
+    } else {
+      await layerNextjsBuild(hostDir, appHostDir);
+    }
+
     await copyFile(hostJsPath, join(appHostDir, 'fsn.host.js'));
   }
 
   // Stage fsn.config.js so the main process can read hosts at runtime.
   await copyFile(join(cwd, 'fsn.config.js'), join(appDir, 'fsn.config.js'));
 
-  // Write the Electron main (ESM, InProcessSocket-based).
+  // Write the Electron main, which routes window requests to each host.
   await writeFile(join(workdir, 'main.js'), await readAsset('application.template.js'));
 
   await packageApp({ workdir, cwd, main: 'main.js' });
 }
 
 /**
- * Stage a built Next.js app into `dest` for packaging.
+ * Install a host package's production dependencies into `dest`.
  *
- * pnpm's isolated install leaves node_modules full of symlinks into
- * .pnpm/ — that breaks require() once the tree is asar-bundled. `pnpm deploy`
- * rewrites the tree with all prod deps fully inlined and devDeps stripped,
- * using --node-linker=hoisted so node_modules is flat (no .pnpm subdir).
- * It only copies the package's published files, so the build output and
- * runtime-relevant config/assets are layered back on afterwards.
+ * pnpm's isolated install leaves node_modules full of symlinks into .pnpm/ —
+ * those break require() once the tree is asar-bundled. `pnpm deploy` rewrites
+ * the tree with all prod deps fully inlined and devDeps stripped, using
+ * --node-linker=hoisted so node_modules is flat (no .pnpm subdir). It also
+ * copies the package's published files; build output is layered on after.
  *
- * @param srcDir  Directory containing the built Next.js package.
- * @param dest    Where to stage it.
  * @param options
  *   `filter` is the package name for pnpm --filter; `cwd` is a directory
  *   inside the pnpm workspace that contains it.
  */
-async function stageNextjs(
-  srcDir: string,
+async function deployProd(
   dest: string,
   { filter, cwd }: { filter: string; cwd: string }
 ): Promise<void> {
-  await run('pnpm', ['--filter', filter, 'deploy', '--prod', '--legacy', '--config.node-linker=hoisted', dest], { cwd });
+  // Non-legacy deploy needs a shared workspace lockfile (fsn init projects
+  // have one). Without one, fall back to --legacy — which newer pnpm (12)
+  // ignores when a lockfile exists, silently installing nothing.
+  const legacy = await exists(join(cwd, 'pnpm-lock.yaml')) ? [] : ['--legacy'];
+  await run('pnpm', ['--filter', filter, 'deploy', '--prod', ...legacy, '--config.node-linker=hoisted', dest], { cwd });
   // Hoisted deploy leaves symlinks to sibling workspace packages in
   // node_modules; once staged elsewhere they dangle and break packaging.
   const nodeModules = join(dest, 'node_modules');
+  if (!await exists(nodeModules)) return;
   for (const entry of await readdir(nodeModules)) {
     const p = join(nodeModules, entry);
     if ((await lstat(p)).isSymbolicLink() && !await exists(p)) await rm(p);
   }
+}
+
+/**
+ * Copy a built Next.js app's build output into `dest`. The host boots from
+ * the config serialized in .next/, so no source or next.config.* is needed.
+ */
+async function layerNextjsBuild(srcDir: string, dest: string): Promise<void> {
   await cp(join(srcDir, '.next'), join(dest, '.next'), { recursive: true });
-  for (const dir of ['public', 'src']) {
-    const src = join(srcDir, dir);
-    if (await exists(src)) await cp(src, join(dest, dir), { recursive: true });
+  if (await exists(join(srcDir, 'public'))) {
+    await cp(join(srcDir, 'public'), join(dest, 'public'), { recursive: true });
   }
-  for (const cfg of ['next.config.ts', 'next.config.mjs', 'next.config.js', 'next-env.d.ts', 'tsconfig.json']) {
-    const src = join(srcDir, cfg);
-    if (await exists(src)) await cp(src, join(dest, cfg));
-  }
+  await writeFile(join(dest, 'fsn.cache-handler.cjs'), await readAsset('fsn.cache-handler.nextjs.cjs'));
 }
