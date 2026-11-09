@@ -1,4 +1,5 @@
 {
   "name": "@fsn/monorepo",
+  "license": "MIT",
   "repository": "git+https://github.com/ashwin-mahadevan/fsn.git"
 }
