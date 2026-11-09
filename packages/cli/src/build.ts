@@ -75,7 +75,7 @@ export async function build(): Promise<void> {
  * Install a host package's production dependencies into `dest`.
  *
  * pnpm's isolated install leaves node_modules full of symlinks into .pnpm/ —
- * those break require() once the tree is asar-bundled. `pnpm deploy` rewrites
+ * those break require() once the tree is copied into the app. `pnpm deploy` rewrites
  * the tree with all prod deps fully inlined and devDeps stripped, using
  * --node-linker=hoisted so node_modules is flat (no .pnpm subdir). It also
  * copies the package's published files; build output is layered on after.

@@ -65,6 +65,12 @@ export async function packageApp({ workdir, cwd, main }: {
     '--overwrite',
     '--platform', platform,
     '--arch', process.arch,
+    // Ship the app as a plain folder (Resources/app), not an app.asar archive.
+    // The OS can't see inside an asar, so anything a host's dependencies hand
+    // to it directly breaks there: executables they spawn (node-pty's
+    // spawn-helper) and files they pass to other programs. The packager only
+    // unpacks *.node files, and guessing every other such file isn't worth it.
+    '--no-asar',
   ], { cwd: workdir });
 
   const projectDist = join(cwd, 'dist');

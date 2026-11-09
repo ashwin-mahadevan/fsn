@@ -1,7 +1,9 @@
 // FSN cache handler for Next.js (`cacheHandler` in the runtime config).
 //
 // Next's default FileSystemCache writes ISR / revalidation results into
-// `.next/`, which in a packaged app sits inside the read-only app.asar. This
+// `.next/`, which in a packaged app sits inside the app bundle: often not
+// writable (e.g. in /Applications), and writing there would break its code
+// signature. This
 // is the same cache with an overlay filesystem: writes go to a per-host,
 // per-build directory under Electron's userData; reads look there first and
 // fall back to the build-time files in `.next/`.
