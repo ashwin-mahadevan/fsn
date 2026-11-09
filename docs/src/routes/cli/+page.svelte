@@ -20,7 +20,36 @@ pnpm build</code
 	The packaged app is written to <code>dist/</code> for your current platform and architecture.
 </p>
 
+<h2>Running the CLI</h2>
+<p>There are two ways to run it.</p>
+
+<h3>Without installing</h3>
+<p>
+	Use this outside a project, such as for <code>fsn init</code>. The package name is
+	<code>@fsn.dev/cli</code>, and everything after it is passed to <code>fsn</code>:
+</p>
+<pre><code>npx @fsn.dev/cli --help
+pnpm dlx @fsn.dev/cli --help</code></pre>
+
+<h3>Inside a project</h3>
+<p>
+	Projects created by <code>fsn init</code> have <code>@fsn.dev/cli</code> as a dev dependency, so the
+	<code>fsn</code> command is available directly:
+</p>
+<pre><code>pnpm exec fsn --help
+npx fsn --help</code></pre>
+<p>
+	In a project's <code>package.json</code> scripts, <code>fsn</code> works as is. The generated
+	project already has <code>"build": "fsn build"</code>, so <code>pnpm build</code> runs
+	<code>fsn build</code>. If you add the CLI to an existing project, install it with
+	<code>pnpm add -D @fsn.dev/cli</code>.
+</p>
+
 <h2>Commands</h2>
+<p>
+	Examples below are written as <code>fsn &lt;command&gt;</code>. Use either form above, for example
+	<code>npx @fsn.dev/cli init</code> or <code>pnpm exec fsn build</code>.
+</p>
 
 <h3><code>fsn init</code></h3>
 <pre><code>fsn init [--project &lt;dir&gt;] [--framework &lt;sveltekit|nextjs&gt;]</code></pre>
