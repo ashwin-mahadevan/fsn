@@ -13,6 +13,8 @@ Commands:
                                                --project defaults to "." (must be empty),
                                                --framework defaults to nextjs.
   fsn build                                    Build the current project into a native app.
+
+Docs: https://fsn.dev/cli
 `;
 
 try {
