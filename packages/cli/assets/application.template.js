@@ -1,8 +1,53 @@
-import { app, BrowserWindow, protocol, net } from 'electron';
+import { app, BrowserWindow, protocol, net, session } from 'electron';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const SAME_SITE = { strict: 'strict', lax: 'lax', none: 'no_restriction' };
+
+/** Apply one Set-Cookie header from a host response to Electron's cookie store. */
+async function storeSetCookie(cookies, url, header) {
+  const [pair, ...attributes] = header.split(';');
+  const eq = pair.indexOf('=');
+  if (eq <= 0) return;
+  const cookie = { url, name: pair.slice(0, eq).trim(), value: pair.slice(eq + 1).trim() };
+  let expired = false;
+
+  for (const attribute of attributes) {
+    const [rawKey, ...rest] = attribute.split('=');
+    const key = rawKey.trim().toLowerCase();
+    const value = rest.join('=').trim();
+    if (key === 'path') cookie.path = value;
+    else if (key === 'domain') cookie.domain = value;
+    else if (key === 'secure') cookie.secure = true;
+    else if (key === 'httponly') cookie.httpOnly = true;
+    else if (key === 'samesite') cookie.sameSite = SAME_SITE[value.toLowerCase()] ?? 'unspecified';
+    else if (key === 'max-age') {
+      // Max-Age wins over Expires (RFC 6265 §5.3).
+      const seconds = Number(value);
+      if (seconds <= 0) expired = true;
+      else cookie.expirationDate = Date.now() / 1000 + seconds;
+    } else if (key === 'expires' && cookie.expirationDate === undefined) {
+      const time = Date.parse(value);
+      if (!Number.isNaN(time)) {
+        if (time <= Date.now()) expired = true;
+        else cookie.expirationDate = time / 1000;
+      }
+    }
+  }
+
+  try {
+    if (expired) {
+      const scope = new URL(url);
+      if (cookie.path) scope.pathname = cookie.path;
+      await cookies.remove(scope.href, cookie.name);
+    } else {
+      await cookies.set(cookie);
+    }
+  } catch (err) {
+    console.error(`[fsn] couldn't store cookie "${cookie.name}" from ${url}:`, err);
+  }
+}
 
 app.whenReady().then(async () => {
   // fsn build stages everything under app/ alongside this file.
@@ -62,10 +107,40 @@ app.whenReady().then(async () => {
 
   // Requests to http://<name>.localhost go straight to that host in-process:
   // no port, no socket, not reachable from any other process.
-  protocol.handle('http', (request) => {
+  //
+  // Chromium hands intercepted requests over without the headers its network
+  // stack would add (Cookie, Origin, Referer), and ignores Set-Cookie on the
+  // responses. So cookies go through the session's cookie store here, and
+  // Origin/Referer are rebuilt from request.referrer, which Chromium sets and
+  // a page can only shorten, never forge.
+  const cookies = session.defaultSession.cookies;
+  protocol.handle('http', async (request) => {
     const host = hostFor(new URL(request.url).hostname);
     if (!host) return net.fetch(request, { bypassCustomProtocolHandlers: true });
-    return host.fetch(request);
+
+    const headers = new Headers(request.headers);
+    const jar = await cookies.get({ url: request.url });
+    if (jar.length > 0) headers.set('cookie', jar.map((c) => `${c.name}=${c.value}`).join('; '));
+    if (request.referrer && request.referrer !== 'about:client') {
+      headers.set('referer', request.referrer);
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        headers.set('origin', new URL(request.referrer).origin);
+      }
+    }
+
+    const response = await host.fetch(new Request(request.url, {
+      method: request.method,
+      headers,
+      body: request.body,
+      duplex: 'half',
+      redirect: 'manual',
+      signal: request.signal,
+    }));
+
+    for (const header of response.headers.getSetCookie()) {
+      await storeSetCookie(cookies, request.url, header);
+    }
+    return response;
   });
 
   for (const name of Object.keys(config.hosts)) {
