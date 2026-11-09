@@ -2,6 +2,15 @@ import { readdir, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
 import { log, exists, run } from './utils.js';
 
+/**
+ * The version range FSN packages are installed at in new projects. The CLI and
+ * its adapters are released in lockstep, so this is the CLI's own version.
+ */
+async function fsnVersionRange(): Promise<string> {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  return `^${pkg.version}`;
+}
+
 export async function init(projectName: string, framework: string): Promise<void> {
   const projectDir = resolve(projectName);
   if (await exists(projectDir)) {
@@ -66,7 +75,7 @@ async function scaffoldSveltekit(projectDir: string): Promise<void> {
   const pkgPath = join(nativeDir, 'package.json');
   const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
   delete pkg.devDependencies['@sveltejs/adapter-auto'];
-  pkg.devDependencies['@fsn.dev/adapter-sveltekit'] = '*';
+  pkg.devDependencies['@fsn.dev/adapter-sveltekit'] = await fsnVersionRange();
   await writeFile(pkgPath, JSON.stringify(pkg, null, '\t') + '\n');
 
   await removeNestedWorkspace(nativeDir);
@@ -126,7 +135,7 @@ async function writeWorkspaceFiles(projectDir: string): Promise<void> {
           build: 'fsn build',
         },
         devDependencies: {
-          '@fsn.dev/cli': '*',
+          '@fsn.dev/cli': await fsnVersionRange(),
         },
       },
       null,
