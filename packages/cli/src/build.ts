@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, writeFile, readFile, readdir, lstat, rm, cp, copyFile } from 'node:fs/promises';
-import { join, dirname, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { log, exists, run, readAsset } from './utils.js';
 import { loadConfig } from './config.js';
@@ -21,9 +21,8 @@ export async function build(): Promise<void> {
   const appDir = join(workdir, 'app');
   await mkdir(appDir, { recursive: true });
 
-  for (const [name, hostRelPath] of Object.entries(config.hosts)) {
-    const hostJsPath = resolve(cwd, hostRelPath);
-    const hostDir = dirname(hostJsPath);
+  for (const [name, hostRelDir] of Object.entries(config.hosts)) {
+    const hostDir = resolve(cwd, hostRelDir);
     const appHostDir = join(appDir, name);
     await mkdir(appHostDir, { recursive: true });
 
@@ -57,7 +56,10 @@ export async function build(): Promise<void> {
       await layerNextjsBuild(hostDir, appHostDir);
     }
 
-    await copyFile(hostJsPath, join(appHostDir, 'fsn.host.js'));
+    // The entry the main process loads: { fetch(request) => Response }.
+    // .mjs, since the host's package.json may not declare "type": "module".
+    const framework = isSvelteKit ? 'sveltekit' : 'nextjs';
+    await writeFile(join(appHostDir, 'fsn.host.mjs'), await readAsset(`fsn.host.${framework}.js`));
   }
 
   // Stage fsn.config.js so the main process can read hosts at runtime.

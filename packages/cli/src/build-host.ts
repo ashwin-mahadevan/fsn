@@ -1,4 +1,4 @@
-import { join, dirname, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { log, exists, run } from './utils.js';
 import { loadConfig } from './config.js';
 
@@ -12,12 +12,12 @@ import { loadConfig } from './config.js';
 export async function buildHost(name: string): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig(cwd);
-  const hostRelPath = config.hosts[name];
-  if (!hostRelPath) {
+  const hostRelDir = config.hosts[name];
+  if (!hostRelDir) {
     throw new Error(`Host "${name}" not found in fsn.config.js. Available: ${Object.keys(config.hosts).join(', ')}`);
   }
 
-  const hostDir = resolve(cwd, dirname(hostRelPath));
+  const hostDir = resolve(cwd, hostRelDir);
   log(`building host "${name}" in ${hostDir}`);
 
   if (!await exists(join(hostDir, 'node_modules'))) {

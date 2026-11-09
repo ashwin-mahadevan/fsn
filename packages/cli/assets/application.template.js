@@ -97,10 +97,10 @@ app.whenReady().then(async () => {
     } : { headers: request.headers });
   };
 
-  // fsn build stages each host at app/<name>/fsn.host.js, which
-  // default-exports { fetch(request) => Response }.
+  // fsn build stages each host at app/<name>/, with a generated
+  // fsn.host.mjs that default-exports { fetch(request) => Response }.
   for (const name of Object.keys(config.hosts)) {
-    const hostPath = path.join(appDir, name, 'fsn.host.js');
+    const hostPath = path.join(appDir, name, 'fsn.host.mjs');
     const { default: host } = await import(pathToFileURL(hostPath).href);
     hosts.set(name, host);
   }

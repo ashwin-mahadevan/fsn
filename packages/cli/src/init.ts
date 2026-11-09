@@ -1,6 +1,6 @@
 import { readdir, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
-import { log, exists, run, readAsset } from './utils.js';
+import { log, exists, run } from './utils.js';
 
 export async function init(projectName: string, framework: string): Promise<void> {
   const projectDir = resolve(projectName);
@@ -19,7 +19,7 @@ export async function init(projectName: string, framework: string): Promise<void
     await scaffoldNextjs(projectDir);
   }
 
-  await writeWorkspaceFiles(projectDir, framework);
+  await writeWorkspaceFiles(projectDir);
 
   log(`done. Next:`);
   if (projectDir !== process.cwd()) log(`  cd ${projectName}`);
@@ -106,7 +106,7 @@ async function removeNestedWorkspace(nativeDir: string): Promise<void> {
   if (await exists(nestedWs)) await rm(nestedWs);
 }
 
-async function writeWorkspaceFiles(projectDir: string, framework: string): Promise<void> {
+async function writeWorkspaceFiles(projectDir: string): Promise<void> {
   await writeFile(
     join(projectDir, 'pnpm-workspace.yaml'),
     // Both templates pull in sharp (Next.js directly, SvelteKit via
@@ -136,12 +136,7 @@ async function writeWorkspaceFiles(projectDir: string, framework: string): Promi
 
   await writeFile(
     join(projectDir, 'fsn.config.js'),
-    `/** @type {import('@fsn.dev/cli').Config} */\nexport default {\n  hosts: {\n    native: './native/fsn.host.js',\n  },\n};\n`
-  );
-
-  await writeFile(
-    join(projectDir, 'native', 'fsn.host.js'),
-    await readAsset(`fsn.host.${framework}.js`)
+    `/** @type {import('@fsn.dev/cli').Config} */\nexport default {\n  hosts: {\n    native: './native',\n  },\n};\n`
   );
 
   await writeFile(

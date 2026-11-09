@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { exists } from './utils.js';
 import type { Config } from './index.js';
@@ -15,7 +15,15 @@ export async function loadConfig(cwd: string): Promise<Config> {
     throw new Error(`fsn.config.js must default-export a Config object`);
   }
   if (typeof config.hosts !== 'object' || config.hosts === null || Object.keys(config.hosts).length === 0) {
-    throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to fsn.host.js paths`);
+    throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to package directories`);
+  }
+  for (const [name, hostPath] of Object.entries(config.hosts)) {
+    if (typeof hostPath !== 'string' || !await exists(join(resolve(cwd, hostPath), 'package.json'))) {
+      throw new Error(
+        `fsn.config.js: hosts.${name} must be the path to a package directory ` +
+        `(e.g. './native'), but ${JSON.stringify(hostPath)} has no package.json.`
+      );
+    }
   }
   return config;
 }

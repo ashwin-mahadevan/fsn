@@ -1,10 +1,11 @@
-// FSN host for Next.js. Default export: { fetch(request: Request): Promise<Response> }.
+// FSN host for Next.js, written by fsn build next to the app's .next/.
+// Default export: { fetch(request: Request): Promise<Response> }.
 //
 // Next.js only exposes a Node-style (req, res) handler, so this wraps it in an
 // http.Server that never listens and feeds it each Request over an in-memory
 // socket pair. Node's own HTTP parser does the req/res plumbing.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
@@ -22,8 +23,7 @@ const { config } = JSON.parse(
 );
 // fsn build stages a cache handler that writes ISR results to userData
 // instead of the read-only app bundle.
-const cacheHandler = path.join(__dirname, 'fsn.cache-handler.cjs');
-if (existsSync(cacheHandler)) config.cacheHandler = cacheHandler;
+config.cacheHandler = path.join(__dirname, 'fsn.cache-handler.cjs');
 
 process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(config);
 const nextApp = next({ dev: false, dir: __dirname });
