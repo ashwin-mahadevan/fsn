@@ -1,0 +1,58 @@
+# Builds and checks everything. Runs on every PR, and publish.yml calls it
+# before publishing so a release never goes out from a broken master.
+name: Checks
+on:
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    name: build (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [cli, adapter-sveltekit]
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  docs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm check
+      - run: pnpm build
+
+  # End-to-end: package the SvelteKit example with the local CLI and adapter.
+  example:
+    name: example (sveltekit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - name: Build local packages
+        run: |
+          for dir in packages/cli packages/adapter-sveltekit; do
+            (cd "$dir" && pnpm install --frozen-lockfile && pnpm build)
+          done
+      # Examples don't commit lockfiles.
+      - run: pnpm install --no-frozen-lockfile
+        working-directory: examples/sveltekit
+      - run: pnpm build
+        working-directory: examples/sveltekit
