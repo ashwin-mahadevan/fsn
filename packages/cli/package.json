@@ -30,9 +30,9 @@
     "node": ">=22"
   },
   "devDependencies": {
-    "@types/node": "^25.9.0",
-    "typescript": "^5.9.0",
     "@electron/packager": "20.3.0",
-    "electron": "45.2.3"
+    "@types/node": "^26.6.6",
+    "electron": "45.2.3",
+    "typescript": "^5.9.0"
   }
 }

@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.70.0",
-    "@types/node": "^25.9.0",
+    "@types/node": "^26.6.6",
     "typescript": "^5.9.0"
   }
 }
