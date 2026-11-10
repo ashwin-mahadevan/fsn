@@ -32,3 +32,15 @@ the single-file CLI), so trust the code over it.
   `pnpm lint` and `pnpm check`.
 - Packages are published to npm. Bump the version in a package's
   `package.json` when its published behavior changes.
+
+## CI/CD
+
+- `.github/workflows/checks.yml` runs on every PR: builds both packages,
+  lints/checks/builds the docs, and packages the SvelteKit example end to end.
+- `.github/workflows/publish.yml` runs on every push to `master`. Any package
+  whose `package.json` version isn't on npm yet is published (after the checks
+  pass) and gets a GitHub release tagged `<name>@<version>`. Prerelease
+  versions go to the `next` dist-tag. Auth is npm trusted publishing.
+- The docs site deploys to Vercel from `master` (project `fsn.dev`, root
+  `docs/`), with preview deploys on PRs. That's Vercel's Git integration, not a
+  workflow here.
