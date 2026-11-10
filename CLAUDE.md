@@ -35,6 +35,11 @@ the single-file CLI), so trust the code over it.
 
 ## CI/CD
 
+Merging a PR into `master` is the only way to publish or deploy. Never run
+`npm publish`, `vercel deploy` or `gh release create` by hand. To release a
+package, bump its `version` in the PR and merge it. A merge that doesn't bump a
+version publishes nothing.
+
 - `.github/workflows/checks.yml` runs on every PR: builds both packages,
   lints/checks/builds the docs, and packages the SvelteKit example end to end.
 - `.github/workflows/publish.yml` runs on every push to `master`. Any package
