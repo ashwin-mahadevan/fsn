@@ -7,17 +7,18 @@ function sanitizeAppName(name: string): string {
 }
 
 /**
- * The Electron and @electron/packager versions to build with. They're pinned
- * in this package's devDependencies (exact versions) so builds are
- * reproducible and bumped like any other dependency.
+ * The Electron and @electron/packager versions to build with, taken from this
+ * package's devDependencies. They can be caret ranges (^45.2.3): `npm install`
+ * resolves them when an app is built, so builds pick up newer minor and patch
+ * releases but never a new major.
  */
 async function pinnedVersions(): Promise<Record<'electron' | '@electron/packager', string>> {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const result = {} as Record<'electron' | '@electron/packager', string>;
   for (const name of ['electron', '@electron/packager'] as const) {
     const version = pkg.devDependencies?.[name];
-    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+/.test(version)) {
-      throw new Error(`@fsn.dev/cli is missing a pinned version for ${name}.`);
+    if (typeof version !== 'string' || !/^\^?\d+\.\d+\.\d+/.test(version)) {
+      throw new Error(`@fsn.dev/cli is missing a version for ${name}.`);
     }
     result[name] = version;
   }

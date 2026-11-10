@@ -9,13 +9,13 @@ importers:
   .:
     devDependencies:
       '@electron/packager':
-        specifier: 20.3.0
+        specifier: ^20.3.0
         version: 20.3.0
       '@types/node':
         specifier: ^25.9.0
         version: 25.9.0
       electron:
-        specifier: 45.2.3
+        specifier: ^45.2.3
         version: 45.2.3
       typescript:
         specifier: ^5.9.0
