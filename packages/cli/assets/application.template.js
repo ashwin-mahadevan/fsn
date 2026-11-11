@@ -59,8 +59,6 @@ app.whenReady().then(async () => {
   process.env.FSN_DATA_DIR = app.getPath('userData');
 
   const hosts = new Map();
-  const hostFor = (hostname) =>
-    hostname.endsWith('.localhost') ? hosts.get(hostname.slice(0, -'.localhost'.length)) : undefined;
 
   // Server code fetching its own origin (e.g. Next.js fetching the target of
   // a server action's redirect()) runs in this process, where requests don't
@@ -70,7 +68,7 @@ app.whenReady().then(async () => {
   globalThis.fetch = async function fetch(input, init) {
     const href = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
     const url = new URL(href);
-    const host = hostFor(url.hostname);
+    const host = hosts.get(url.hostname);
     if (!host) return nodeFetch(input, init);
 
     const request = new Request(input, init);
@@ -102,7 +100,7 @@ app.whenReady().then(async () => {
   for (const name of Object.keys(config.hosts)) {
     const hostPath = path.join(appDir, name, 'fsn.host.mjs');
     const { default: host } = await import(pathToFileURL(hostPath).href);
-    hosts.set(name, host);
+    hosts.set(`${name}.localhost`, host);
   }
 
   // Requests to http://<name>.localhost go straight to that host in-process:
@@ -115,7 +113,7 @@ app.whenReady().then(async () => {
   // a page can only shorten, never forge.
   const cookies = session.defaultSession.cookies;
   protocol.handle('http', async (request) => {
-    const host = hostFor(new URL(request.url).hostname);
+    const host = hosts.get(new URL(request.url).hostname);
     if (!host) return net.fetch(request, { bypassCustomProtocolHandlers: true });
 
     const headers = new Headers(request.headers);
