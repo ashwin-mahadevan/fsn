@@ -37,11 +37,15 @@ async function pinnedVersions(): Promise<Record<'electron' | '@electron/packager
  * @param options.workdir  Directory containing `main` and `app/`.
  * @param options.cwd      The user's project directory.
  * @param options.main     Filename of the Electron main process in workdir.
+ * @param options.icon     Absolute path to the app icon, for @electron/packager.
+ *                         Extensionless, it picks the platform's file next to
+ *                         it (.icon/.icns on macOS, .ico on Windows).
  */
-export async function packageApp({ workdir, cwd, main }: {
+export async function packageApp({ workdir, cwd, main, icon }: {
   workdir: string;
   cwd: string;
   main: string;
+  icon?: string;
 }): Promise<void> {
   const versions = await pinnedVersions();
   const appName = sanitizeAppName(basename(cwd));
@@ -66,6 +70,7 @@ export async function packageApp({ workdir, cwd, main }: {
     '--overwrite',
     '--platform', platform,
     '--arch', process.arch,
+    ...(icon ? ['--icon', icon] : []),
     // Ship the app as a plain folder (Resources/app), not an app.asar archive.
     // The OS can't see inside an asar, so anything a host's dependencies hand
     // to it directly breaks there: executables they spawn (node-pty's
