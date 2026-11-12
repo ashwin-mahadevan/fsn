@@ -4,6 +4,15 @@ export type Config = {
    * package. Each host gets a window at `http://<host-name>.localhost/`.
    */
   hosts: Record<string, string>;
+
+  /**
+   * Path (relative to fsn.config.js) to the app icon, passed to
+   * @electron/packager. Give it without an extension and the packager picks
+   * the platform's own file next to it: `.icon` (Icon Composer) or `.icns` on
+   * macOS, `.ico` on Windows. Linux apps get no embedded icon; desktop
+   * environments take one from an icon theme instead.
+   */
+  icon?: string;
 };
 
 /**

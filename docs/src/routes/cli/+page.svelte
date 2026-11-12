@@ -124,6 +124,15 @@ export default &#123;
   nextjs: './nextjs',
 &#125;,</code
 	></pre>
+<p>
+	<code>icon</code> (optional) is the path of the app's icon, relative to the config file, passed to
+	<a href="https://github.com/electron/packager">@electron/packager</a>. Give it without an
+	extension and the packager picks the platform's own file next to it: <code>.icon</code> (an Icon
+	Composer document) or <code>.icns</code> on macOS, <code>.ico</code> on Windows. With
+	<code>icon: './icon'</code>, a macOS build uses <code>icon.icon</code> (or <code>icon.icns</code>)
+	and a Windows build uses <code>icon.ico</code>. Linux apps get no embedded icon; desktop
+	environments take one from an icon theme instead.
+</p>
 
 <h2 id="hooks">Hooks</h2>
 <p>

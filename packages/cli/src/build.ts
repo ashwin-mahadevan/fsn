@@ -72,7 +72,10 @@ export async function build(): Promise<void> {
   // Write the Electron main, which routes window requests to each host.
   await writeFile(join(workdir, 'main.js'), await readAsset('application.template.js'));
 
-  await packageApp({ workdir, cwd, main: 'main.js' });
+  await packageApp({
+    workdir, cwd, main: 'main.js',
+    icon: config.icon && resolve(cwd, config.icon),
+  });
 }
 
 /**

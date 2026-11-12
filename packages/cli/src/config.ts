@@ -17,6 +17,9 @@ export async function loadConfig(cwd: string): Promise<Config> {
   if (typeof config.hosts !== 'object' || config.hosts === null || Object.keys(config.hosts).length === 0) {
     throw new Error(`fsn.config.js: hosts must be a non-empty object mapping names to package directories`);
   }
+  if (config.icon !== undefined && typeof config.icon !== 'string') {
+    throw new Error(`fsn.config.js: icon must be a path string (e.g. './icon'), relative to the config file`);
+  }
   for (const [name, hostPath] of Object.entries(config.hosts)) {
     if (typeof hostPath !== 'string' || !await exists(join(resolve(cwd, hostPath), 'package.json'))) {
       throw new Error(
