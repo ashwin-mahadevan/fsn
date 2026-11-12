@@ -12,7 +12,7 @@ private XTerm.app repo.
 
 | Folder                        | What it is                                                     |
 | ----------------------------- | -------------------------------------------------------------- |
-| `packages/cli/`               | `@fsn.dev/cli`: the `fsn` command and the `Config` type        |
+| `packages/cli/`               | `@fsn.dev/cli`: the `fsn` command, the `Config` and `Hooks` types |
 | `packages/adapter-sveltekit/` | `@fsn.dev/adapter-sveltekit`: SvelteKit adapter for FSN        |
 | `docs/`                       | The documentation site (SvelteKit)                             |
 | `examples/`                   | `sveltekit`, `nextjs` and `multi-host` example apps            |

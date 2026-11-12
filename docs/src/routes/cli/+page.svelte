@@ -88,6 +88,7 @@ npx fsn --help</code
 <ol>
 	<li>Builds every host listed in <code>fsn.config.js</code>.</li>
 	<li>Stages each host's production dependencies and build output in a temporary directory.</li>
+	<li>Bundles <code>fsn.ts</code>, if the project has one (see <a href="#hooks">Hooks</a>).</li>
 	<li>Packages the result with Electron Packager.</li>
 	<li>Copies the app to <code>dist/</code>, replacing any previous contents.</li>
 </ol>
@@ -123,3 +124,126 @@ export default &#123;
   nextjs: './nextjs',
 &#125;,</code
 	></pre>
+
+<h2 id="hooks">Hooks</h2>
+<p>
+	To run code in the app's main process, add an <code>fsn.ts</code> (or <code>fsn.js</code>) next to
+	<code>fsn.config.js</code>. Each of its named exports is a hook that FSN calls at one point in the
+	app's life:
+</p>
+<pre><code
+		>import &#123; app, Menu &#125; from 'electron';
+import type &#123; Hooks &#125; from '@fsn.dev/cli';
+
+// Runs before the first window opens.
+export const ready: Hooks['ready'] = () =&gt; &#123;
+  Menu.setApplicationMenu(Menu.buildFromTemplate([&#123; role: 'appMenu' &#125;, &#123; role: 'editMenu' &#125;]));
+&#125;;
+
+// Quit when the last window closes, on macOS too.
+export const windowAllClosed: Hooks['windowAllClosed'] = () =&gt; &#123;
+  app.quit();
+&#125;;</code
+	></pre>
+<p>
+	Except for <code>ready</code>, a hook is a listener for the event of the same name on Electron's
+	<a href="https://www.electronjs.org/docs/latest/api/app#events"><code>app</code></a>, and is
+	called with that event's arguments: <code>beforeQuit</code> is the listener for
+	<code>before-quit</code>.
+</p>
+<table>
+	<thead>
+		<tr><th>Export</th><th>Called when</th></tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td><code>ready()</code></td>
+			<td>
+				The app is ready and its hosts are being served, before FSN opens the first windows. If it
+				returns a promise, FSN waits for it.
+			</td>
+		</tr>
+		<tr>
+			<td><code>activate(event, hasVisibleWindows)</code></td>
+			<td>
+				macOS: the app is activated, for example from the Dock. Replaces the default, which reopens
+				the hosts' windows when none are open. Not called before the first windows have opened.
+			</td>
+		</tr>
+		<tr>
+			<td><code>windowAllClosed()</code></td>
+			<td> The last window closes. Replaces the default, which quits the app except on macOS. </td>
+		</tr>
+		<tr>
+			<td><code>beforeQuit(event)</code></td>
+			<td>
+				The app is about to close its windows to quit. <code>event.preventDefault()</code> cancels.
+			</td>
+		</tr>
+		<tr>
+			<td><code>willQuit(event)</code></td>
+			<td>
+				Every window has closed and the app will quit. <code>event.preventDefault()</code> cancels.
+			</td>
+		</tr>
+		<tr>
+			<td><code>quit(event, exitCode)</code></td>
+			<td>The app is quitting.</td>
+		</tr>
+		<tr>
+			<td><code>openUrl(event, url)</code></td>
+			<td>macOS: the app is asked to open a URL with one of its schemes.</td>
+		</tr>
+		<tr>
+			<td><code>openFile(event, path)</code></td>
+			<td>macOS: the app is asked to open a file.</td>
+		</tr>
+		<tr>
+			<td><code>secondInstance(event, argv, workingDirectory, additionalData)</code></td>
+			<td>A second instance is launched while this one holds the single-instance lock.</td>
+		</tr>
+		<tr>
+			<td><code>browserWindowCreated(event, window)</code></td>
+			<td>A window is created.</td>
+		</tr>
+		<tr>
+			<td><code>webContentsCreated(event, webContents)</code></td>
+			<td>A window's contents are created.</td>
+		</tr>
+	</tbody>
+</table>
+<p>
+	<code>fsn build</code> fails if <code>fsn.ts</code> exports anything else, so a misspelt hook is caught
+	there.
+</p>
+
+<h3>What <code>fsn.ts</code> can do</h3>
+<ul>
+	<li>
+		<strong>Use Electron.</strong> Import from <code>electron</code> as in any main process. For its
+		types, and those of <code>Hooks</code>, add it to the project with
+		<code>pnpm add -D electron</code>. The app itself is built with the Electron version the CLI
+		pins.
+	</li>
+	<li>
+		<strong>Set up before the app is ready.</strong> The file is loaded before Electron's
+		<code>ready</code> event, so code at its top level can make calls that have to come first, such
+		as <code>app.requestSingleInstanceLock()</code>.
+	</li>
+	<li>
+		<strong>Open windows.</strong> Every window in the app can load a host: from
+		<code>ready</code> on,
+		<code>new BrowserWindow().loadURL('http://&lt;host-name&gt;.localhost/')</code> works.
+	</li>
+	<li>
+		<strong>Call a host.</strong> From <code>ready</code> on,
+		<code>fetch('http://&lt;host-name&gt;.localhost/…')</code> reaches the host in-process, the same
+		way its windows do. Use this, not an import, to reach a host's server code:
+		<code>fsn.ts</code> is bundled apart from the hosts, so an import gets a separate copy of the module,
+		with its own state.
+	</li>
+	<li>
+		<strong>Import other files and packages.</strong> They are bundled in with it. Packages with native
+		addons can't be bundled, so keep those in a host.
+	</li>
+</ul>

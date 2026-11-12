@@ -13,3 +13,5 @@ export type Config = {
 export type Host = {
   fetch(request: Request): Response | Promise<Response>;
 };
+
+export type { Hooks } from './hooks.js';
