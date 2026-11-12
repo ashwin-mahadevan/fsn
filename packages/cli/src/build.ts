@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { log, exists, run, readAsset } from './utils.js';
 import { loadConfig } from './config.js';
 import { buildHost } from './build-host.js';
+import { bundleHooks } from './hooks.js';
 import { packageApp } from './package.js';
 
 export async function build(): Promise<void> {
@@ -64,6 +65,9 @@ export async function build(): Promise<void> {
 
   // Stage fsn.config.js so the main process can read hosts at runtime.
   await copyFile(join(cwd, 'fsn.config.js'), join(appDir, 'fsn.config.js'));
+
+  // Stage the project's hooks, if it has any, for the main process to load.
+  await bundleHooks(cwd, join(appDir, 'fsn.mjs'));
 
   // Write the Electron main, which routes window requests to each host.
   await writeFile(join(workdir, 'main.js'), await readAsset('application.template.js'));

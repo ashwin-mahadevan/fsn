@@ -1,4 +1,5 @@
 import { app, BrowserWindow, protocol, net, session } from 'electron';
+import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
@@ -49,9 +50,24 @@ async function storeSetCookie(cookies, url, header) {
   }
 }
 
+// fsn build stages everything under app/ alongside this file.
+const appDir = path.join(app.getAppPath(), 'app');
+
+// The project's fsn.ts, bundled by fsn build: its named exports are hooks into
+// the app's lifecycle. It loads here, before the app is ready (Electron waits
+// for this module to finish loading), so its top-level code can do whatever
+// must happen by then.
+const hooksPath = path.join(appDir, 'fsn.mjs');
+const { ready, activate, windowAllClosed, ...listeners } =
+  existsSync(hooksPath) ? await import(pathToFileURL(hooksPath).href) : {};
+
+// The other hooks are listeners for the app event they're named after:
+// beforeQuit for 'before-quit'.
+for (const [name, listener] of Object.entries(listeners)) {
+  app.on(name.replace(/[A-Z]/g, (letter) => '-' + letter.toLowerCase()), listener);
+}
+
 app.whenReady().then(async () => {
-  // fsn build stages everything under app/ alongside this file.
-  const appDir = path.join(app.getAppPath(), 'app');
   const configPath = path.join(appDir, 'fsn.config.js');
   const { default: config } = await import(pathToFileURL(configPath).href);
 
@@ -141,17 +157,27 @@ app.whenReady().then(async () => {
     return response;
   });
 
-  for (const name of Object.keys(config.hosts)) {
-    const win = new BrowserWindow({
-      width: 1024,
-      height: 768,
-      title: name,
-      webPreferences: { sandbox: true },
-    });
-    win.loadURL(`http://${name}.localhost/`);
+  function openWindows() {
+    for (const name of Object.keys(config.hosts)) {
+      const win = new BrowserWindow({
+        width: 1024,
+        height: 768,
+        title: name,
+        webPreferences: { sandbox: true },
+      });
+      win.loadURL(`http://${name}.localhost/`);
+    }
   }
 
-  app.on('window-all-closed', () => {
+  await ready?.();
+  openWindows();
+
+  // Registered only now: the hooks may open windows onto the hosts, which
+  // aren't served any earlier.
+  app.on('window-all-closed', windowAllClosed ?? (() => {
     if (process.platform !== 'darwin') app.quit();
-  });
+  }));
+  app.on('activate', activate ?? (() => {
+    if (BrowserWindow.getAllWindows().length === 0) openWindows();
+  }));
 });

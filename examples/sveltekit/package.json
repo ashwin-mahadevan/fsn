@@ -6,6 +6,7 @@
     "build": "fsn build"
   },
   "devDependencies": {
-    "@fsn.dev/cli": "link:../../packages/cli"
+    "@fsn.dev/cli": "link:../../packages/cli",
+    "electron": "^45.2.3"
   }
 }

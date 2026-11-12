@@ -119,9 +119,9 @@ async function writeWorkspaceFiles(projectDir: string): Promise<void> {
   await writeFile(
     join(projectDir, 'pnpm-workspace.yaml'),
     // Both templates pull in sharp (Next.js directly, SvelteKit via
-    // enhanced-img), whose build script pnpm 10+ refuses to run unless it's
-    // explicitly approved.
-    `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n\nallowBuilds:\n  sharp: true\n`
+    // enhanced-img), and the CLI pulls in esbuild. pnpm 10+ refuses to run
+    // their build scripts unless they're explicitly approved.
+    `packages:\n  - native\n\nonlyBuiltDependencies:\n  - electron\n\nallowBuilds:\n  sharp: true\n  esbuild: true\n`
   );
 
   await writeFile(
