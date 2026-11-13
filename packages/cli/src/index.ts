@@ -16,8 +16,9 @@ export type Config = {
 };
 
 /**
- * What `fsn build` generates for each host (app/<name>/fsn.host.mjs). The
- * FSN main process passes it each request made to `http://<name>.localhost`.
+ * What each host is built into: a module with one of these as its default
+ * export. The FSN main process passes it each request made to
+ * `http://<name>.localhost`.
  */
 export type Host = {
   fetch(request: Request): Response | Promise<Response>;

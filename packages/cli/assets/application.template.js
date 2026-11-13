@@ -50,6 +50,12 @@ async function storeSetCookie(cookies, url, header) {
   }
 }
 
+// fsn build writes the app's main from this file, putting the app's hosts in
+// place of the name below: an object of each host's name and a function that
+// imports the module built for it, which default-exports
+// { fetch(request) => Response }.
+const HOSTS = __FSN_HOSTS__;
+
 // fsn build stages everything under app/ alongside this file.
 const appDir = path.join(app.getAppPath(), 'app');
 
@@ -68,9 +74,6 @@ for (const [name, listener] of Object.entries(listeners)) {
 }
 
 app.whenReady().then(async () => {
-  const configPath = path.join(appDir, 'fsn.config.js');
-  const { default: config } = await import(pathToFileURL(configPath).href);
-
   // Where hosts may write at runtime (the app bundle itself is read-only).
   process.env.FSN_DATA_DIR = app.getPath('userData');
 
@@ -111,11 +114,8 @@ app.whenReady().then(async () => {
     } : { headers: request.headers });
   };
 
-  // fsn build stages each host at app/<name>/, with a generated
-  // fsn.host.mjs that default-exports { fetch(request) => Response }.
-  for (const name of Object.keys(config.hosts)) {
-    const hostPath = path.join(appDir, name, 'fsn.host.mjs');
-    const { default: host } = await import(pathToFileURL(hostPath).href);
+  for (const [name, load] of Object.entries(HOSTS)) {
+    const { default: host } = await load();
     hosts.set(`${name}.localhost`, host);
   }
 
@@ -158,7 +158,7 @@ app.whenReady().then(async () => {
   });
 
   function openWindows() {
-    for (const name of Object.keys(config.hosts)) {
+    for (const name of Object.keys(HOSTS)) {
       const win = new BrowserWindow({
         width: 1024,
         height: 768,
