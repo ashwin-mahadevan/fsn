@@ -31,6 +31,9 @@ the single-file CLI), so trust the code over it.
   lockfile. Install and run scripts from inside the folder you are changing.
 - Packages build with `pnpm build` (`tsc`). In `docs/`, run `pnpm format`,
   `pnpm lint` and `pnpm check`.
+- The docs' pages are Markdown in `docs/src/content/`, listed in
+  `docs/src/lib/nav.ts`. `pnpm build` there fails on a broken internal link or
+  anchor, so run it after changing a page.
 - Packages are published to npm. Bump the version in a package's
   `package.json` when its published behavior changes.
 
