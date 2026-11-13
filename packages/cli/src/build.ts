@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile, readFile, readdir, lstat, rm, cp, copyFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, readdir, lstat, rm, cp } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { log, exists, run, readAsset } from './utils.js';
@@ -22,6 +22,10 @@ export async function build(): Promise<void> {
   const appDir = join(workdir, 'app');
   await mkdir(appDir, { recursive: true });
 
+  // Host name → the module the main process loads for it, relative to the
+  // main: one that default-exports { fetch(request) => Response }.
+  const entries: Record<string, string> = {};
+
   for (const [name, hostRelDir] of Object.entries(config.hosts)) {
     const hostDir = resolve(cwd, hostRelDir);
     const appHostDir = join(appDir, name);
@@ -42,9 +46,11 @@ export async function build(): Promise<void> {
     // Production dependencies (only `dependencies`, flattened).
     await deployProd(appHostDir, { filter: hostPkg.name, cwd });
 
+    let entry: string;
     if (isSvelteKit) {
       // @fsn.dev/adapter-sveltekit's build/: the server bundled with its
-      // devDependencies, plus client assets and prerendered pages.
+      // devDependencies, plus client assets and prerendered pages. Its
+      // index.js is the module the main process loads.
       const buildDir = join(hostDir, 'build');
       if (!await exists(join(buildDir, 'index.js'))) {
         throw new Error(
@@ -53,24 +59,24 @@ export async function build(): Promise<void> {
         );
       }
       await cp(buildDir, join(appHostDir, 'build'), { recursive: true });
+      entry = 'build/index.js';
     } else {
-      await layerNextjsBuild(hostDir, appHostDir);
+      entry = await layerNextjsBuild(hostDir, appHostDir);
     }
-
-    // The entry the main process loads: { fetch(request) => Response }.
-    // .mjs, since the host's package.json may not declare "type": "module".
-    const framework = isSvelteKit ? 'sveltekit' : 'nextjs';
-    await writeFile(join(appHostDir, 'fsn.host.mjs'), await readAsset(`fsn.host.${framework}.js`));
+    entries[name] = `./app/${name}/${entry}`;
   }
-
-  // Stage fsn.config.js so the main process can read hosts at runtime.
-  await copyFile(join(cwd, 'fsn.config.js'), join(appDir, 'fsn.config.js'));
 
   // Stage the project's hooks, if it has any, for the main process to load.
   await bundleHooks(cwd, join(appDir, 'fsn.mjs'));
 
-  // Write the Electron main, which routes window requests to each host.
-  await writeFile(join(workdir, 'main.js'), await readAsset('application.template.js'));
+  // Write the Electron main, which routes window requests to each host. It
+  // imports each host's module from where that was just staged.
+  const loaders = Object.entries(entries).map(
+    ([name, entry]) => `  ${JSON.stringify(name)}: () => import(${JSON.stringify(entry)}),\n`
+  );
+  const main = (await readAsset('application.template.js'))
+    .replace('__FSN_HOSTS__', () => `{\n${loaders.join('')}}`);
+  await writeFile(join(workdir, 'main.js'), main);
 
   await packageApp({
     workdir, cwd, main: 'main.js',
@@ -113,11 +119,20 @@ async function deployProd(
 /**
  * Copy a built Next.js app's build output into `dest`. The host boots from
  * the config serialized in .next/, so no source or next.config.* is needed.
+ *
+ * @returns The module the main process loads for the host, relative to `dest`.
  */
-async function layerNextjsBuild(srcDir: string, dest: string): Promise<void> {
+async function layerNextjsBuild(srcDir: string, dest: string): Promise<string> {
   await cp(join(srcDir, '.next'), join(dest, '.next'), { recursive: true });
   if (await exists(join(srcDir, 'public'))) {
     await cp(join(srcDir, 'public'), join(dest, 'public'), { recursive: true });
   }
   await writeFile(join(dest, 'fsn.cache-handler.cjs'), await readAsset('fsn.cache-handler.nextjs.cjs'));
+
+  // Next.js's build has no module the main process could load, so FSN stages
+  // its own. It goes in the host's directory, where its import of `next`
+  // finds the host's node_modules. .mjs, since the host's package.json may not
+  // declare "type": "module".
+  await writeFile(join(dest, 'fsn.host.mjs'), await readAsset('fsn.host.nextjs.js'));
+  return 'fsn.host.mjs';
 }
