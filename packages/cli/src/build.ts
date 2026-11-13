@@ -127,12 +127,18 @@ async function layerNextjsBuild(srcDir: string, dest: string): Promise<string> {
   if (await exists(join(srcDir, 'public'))) {
     await cp(join(srcDir, 'public'), join(dest, 'public'), { recursive: true });
   }
-  await writeFile(join(dest, 'fsn.cache-handler.cjs'), await readAsset('fsn.cache-handler.nextjs.cjs'));
 
-  // Next.js's build has no module the main process could load, so FSN stages
-  // its own. It goes in the host's directory, where its import of `next`
-  // finds the host's node_modules. .mjs, since the host's package.json may not
-  // declare "type": "module".
+  // With @fsn.dev/adapter-nextjs as the app's adapter, the build itself wrote
+  // the module the main process loads, into .next/. It finds the routes,
+  // public/ and the host's node_modules from where it is.
+  const adapted = '.next/fsn/index.mjs';
+  if (await exists(join(dest, adapted))) return adapted;
+
+  // Otherwise Next.js's build has no module the main process could load, so
+  // FSN stages its own, which starts Next.js's server. It goes in the host's
+  // directory, where its import of `next` finds the host's node_modules.
+  // .mjs, since the host's package.json may not declare "type": "module".
+  await writeFile(join(dest, 'fsn.cache-handler.cjs'), await readAsset('fsn.cache-handler.nextjs.cjs'));
   await writeFile(join(dest, 'fsn.host.mjs'), await readAsset('fsn.host.nextjs.js'));
   return 'fsn.host.mjs';
 }

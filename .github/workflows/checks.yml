@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [cli, adapter-sveltekit]
+        package: [cli, adapter-sveltekit, adapter-nextjs]
     defaults:
       run:
         working-directory: packages/${{ matrix.package }}
@@ -39,20 +39,28 @@ jobs:
       - run: pnpm check
       - run: pnpm build
 
-  # End-to-end: package the SvelteKit example with the local CLI and adapter.
+  # End-to-end: package an example with the local CLI and its adapter.
   example:
-    name: example (sveltekit)
+    name: example (${{ matrix.framework }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [sveltekit, nextjs]
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       - name: Build local packages
         run: |
-          for dir in packages/cli packages/adapter-sveltekit; do
+          for dir in packages/cli packages/adapter-${{ matrix.framework }}; do
             (cd "$dir" && pnpm install --frozen-lockfile && pnpm build)
           done
       # Examples don't commit lockfiles.
       - run: pnpm install --no-frozen-lockfile
-        working-directory: examples/sveltekit
+        working-directory: examples/${{ matrix.framework }}
       - run: pnpm build
-        working-directory: examples/sveltekit
+        working-directory: examples/${{ matrix.framework }}
+      - name: Check that the app loads the adapter's output
+        if: matrix.framework == 'nextjs'
+        run: grep -F 'import("./app/native/.next/fsn/index.mjs")' dist/*/resources/app/main.js
+        working-directory: examples/nextjs

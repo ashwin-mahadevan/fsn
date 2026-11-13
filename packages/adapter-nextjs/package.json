@@ -1,0 +1,38 @@
+{
+  "name": "@fsn.dev/adapter-nextjs",
+  "description": "Next.js adapter for FSN: serves your app from inside a native app's main process.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashwin-mahadevan/fsn.git",
+    "directory": "packages/adapter-nextjs"
+  },
+  "homepage": "https://fsn.dev",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "files/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@next/routing": "^16.4.0"
+  },
+  "peerDependencies": {
+    "next": ">=16.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "next": "16.2.6",
+    "typescript": "^5.9.0"
+  }
+}
