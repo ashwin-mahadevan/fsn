@@ -2,15 +2,6 @@ import { readdir, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, basename } from 'node:path';
 import { log, exists, run } from './utils.js';
 
-/**
- * The version range FSN packages are installed at in new projects. The CLI and
- * its adapters are released in lockstep, so this is the CLI's own version.
- */
-async function fsnVersionRange(): Promise<string> {
-  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  return `^${pkg.version}`;
-}
-
 export async function init(projectName: string, framework: string): Promise<void> {
   const projectDir = resolve(projectName);
   if (await exists(projectDir)) {
@@ -30,9 +21,17 @@ export async function init(projectName: string, framework: string): Promise<void
 
   await writeWorkspaceFiles(projectDir);
 
+  // FSN's packages are added by pnpm, not written into a package.json here:
+  // it picks each one's version, and installs the project while it's at it.
+  await run('pnpm', ['add', '--save-dev', '--workspace-root', '@fsn.dev/cli'], { cwd: projectDir });
+  if (framework === 'sveltekit') {
+    const nativeDir = join(projectDir, 'native');
+    await run('pnpm', ['remove', '@sveltejs/adapter-auto'], { cwd: nativeDir });
+    await run('pnpm', ['add', '--save-dev', '@fsn.dev/adapter-sveltekit'], { cwd: nativeDir });
+  }
+
   log(`done. Next:`);
   if (projectDir !== process.cwd()) log(`  cd ${projectName}`);
-  log(`  pnpm install`);
   log(`  pnpm build`);
 }
 
@@ -55,6 +54,8 @@ async function scaffoldSveltekit(projectDir: string): Promise<void> {
   // Swap the default adapter-auto for FSN's adapter, which builds the app
   // into a host the Electron main process calls in-process — this is the
   // whole point of FSN: ship fullstack frameworks, not static exports.
+  // sv has no option for it (`sv add sveltekit-adapter` only knows its own
+  // adapters), so the import is replaced here. init() swaps the packages.
   const nativeDir = join(projectDir, 'native');
 
   // Newer sv templates put the kit config in vite.config.ts; older ones use
@@ -71,12 +72,6 @@ async function scaffoldSveltekit(projectDir: string): Promise<void> {
   if (!patched) {
     throw new Error(`Couldn't find the @sveltejs/adapter-auto import in ${nativeDir} to replace.`);
   }
-
-  const pkgPath = join(nativeDir, 'package.json');
-  const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
-  delete pkg.devDependencies['@sveltejs/adapter-auto'];
-  pkg.devDependencies['@fsn.dev/adapter-sveltekit'] = await fsnVersionRange();
-  await writeFile(pkgPath, JSON.stringify(pkg, null, '\t') + '\n');
 
   await removeNestedWorkspace(nativeDir);
 }
@@ -133,9 +128,6 @@ async function writeWorkspaceFiles(projectDir: string): Promise<void> {
         version: '0.0.0',
         scripts: {
           build: 'fsn build',
-        },
-        devDependencies: {
-          '@fsn.dev/cli': await fsnVersionRange(),
         },
       },
       null,
