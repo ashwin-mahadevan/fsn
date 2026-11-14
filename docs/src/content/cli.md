@@ -56,7 +56,7 @@ my-app/
 
 `native/` comes from the framework's own generator: `sv create` for SvelteKit, `create-next-app` for Next.js. For SvelteKit, `fsn init` then swaps `@sveltejs/adapter-auto` for [`@fsn.dev/adapter-sveltekit`](/adapter-sveltekit).
 
-Dependencies aren't installed for you. Run `pnpm install` in the new project before the first build.
+FSN's packages are added with `pnpm add`, so pnpm picks their versions and installs the project's dependencies. The project is ready for `pnpm build`.
 
 ## `fsn build`
 

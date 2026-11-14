@@ -18,7 +18,6 @@ You'll need [Node.js](https://nodejs.org) 22 or newer and [pnpm](https://pnpm.io
 ```sh
 npx @fsn.dev/cli init --project my-app --framework sveltekit
 cd my-app
-pnpm install
 pnpm build
 ```
 
