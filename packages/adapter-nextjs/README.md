@@ -2,9 +2,13 @@
 
 Next.js adapter for [FSN](https://fsn.dev): serves your app from inside a native app's main process.
 
-**A prototype, not published yet.** It needs Next.js 16.2 or newer, the first release with a stable [`adapterPath`](https://nextjs.org/docs/app/api-reference/config/next-config-js/adapterPath).
+**Experimental.** It needs Next.js 16.2 or newer, the first release with a stable [`adapterPath`](https://nextjs.org/docs/app/api-reference/config/next-config-js/adapterPath), and `@fsn.dev/cli` 0.3.1 or newer.
 
 ## Use
+
+```sh
+pnpm add -D @fsn.dev/adapter-nextjs
+```
 
 ```ts
 // next.config.ts

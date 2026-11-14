@@ -14,7 +14,7 @@ private XTerm.app repo.
 | ----------------------------- | -------------------------------------------------------------- |
 | `packages/cli/`               | `@fsn.dev/cli`: the `fsn` command, the `Config` and `Hooks` types |
 | `packages/adapter-sveltekit/` | `@fsn.dev/adapter-sveltekit`: SvelteKit adapter for FSN        |
-| `packages/adapter-nextjs/`    | `@fsn.dev/adapter-nextjs`: Next.js adapter for FSN (prototype) |
+| `packages/adapter-nextjs/`    | `@fsn.dev/adapter-nextjs`: Next.js adapter for FSN (experimental) |
 | `docs/`                       | The documentation site (SvelteKit)                             |
 | `examples/`                   | `sveltekit`, `nextjs` and `multi-host` example apps            |
 
