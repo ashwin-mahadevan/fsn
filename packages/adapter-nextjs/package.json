@@ -8,8 +8,10 @@
     "directory": "packages/adapter-nextjs"
   },
   "homepage": "https://fsn.dev",
-  "private": true,
-  "version": "0.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
