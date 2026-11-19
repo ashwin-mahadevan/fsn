@@ -21,7 +21,7 @@ Code that runs in the app's main process doesn't go in this file. It goes in `fs
 
 **Required.** An object that maps the name of each host to the path of its package, relative to the config file.
 
-A host is a SvelteKit or Next.js package. The path has to hold its `package.json`, and FSN tells the framework from that file's dependencies: `@sveltejs/kit` or `next`. A SvelteKit host has to use [`@fsn.dev/adapter-sveltekit`](/adapter-sveltekit). A Next.js host needs no changes.
+A host is a SvelteKit or Next.js package. The path has to hold its `package.json`, and FSN tells the framework from that file's dependencies: `@sveltejs/kit` or `next`. A SvelteKit host has to use [`@fsn.dev/adapter-sveltekit`](/adapter-sveltekit). A Next.js host needs no changes, though it can use the experimental [`@fsn.dev/adapter-nextjs`](/adapter-nextjs).
 
 The app serves each host at `http://<host-name>.localhost/`, and opens a window on it when it starts. So the name becomes part of your app's URLs, and is what [hooks](/hooks#call-a-host) use to reach the host.
 
