@@ -3,3 +3,6 @@ dist
 
 
 .DS_STORE
+
+# The examples don't commit lockfiles: they link to the local packages.
+examples/*/pnpm-lock.yaml
