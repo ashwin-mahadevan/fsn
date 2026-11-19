@@ -36,7 +36,8 @@ export const sections: NavSection[] = [
 		pages: [
 			{ title: 'CLI', path: '/cli' },
 			{ title: 'Configuration', path: '/configuration' },
-			{ title: 'SvelteKit adapter', path: '/adapter-sveltekit' }
+			{ title: 'SvelteKit adapter', path: '/adapter-sveltekit' },
+			{ title: 'Next.js adapter', path: '/adapter-nextjs' }
 		]
 	}
 ];
