@@ -39,22 +39,23 @@ the single-file CLI), so trust the code over it.
 
 ## Checks and releases
 
-No GitHub workflow checks a PR. PRs are reviewed, checked and merged by the
-maintainer's merge queue.
+No GitHub workflow checks a change. `./checks.sh` runs every check a change
+has to pass, and is run before the change is merged.
 
-- Run `./checks.sh` before opening a PR. It runs every check a PR has to pass:
-  it builds the packages, lints, checks and builds the docs, and packages the
-  SvelteKit and Next.js examples end to end. A new check goes into that script.
-- To release a package, bump its `version` in the PR. After the merge, the
-  merge queue runs `./release.sh`, which publishes each version that isn't on
-  npm yet (a prerelease goes to the `next` dist-tag) and creates its GitHub
-  release, tagged `<name>@<version>`. A merge that doesn't bump a version
-  publishes nothing. A package with `"private": true` is skipped.
-- Never run `npm publish`, `./release.sh`, `gh release create`,
-  `vercel deploy` or the publish workflow yourself.
+- `./checks.sh` builds the packages, lints, checks and builds the docs, and
+  packages the SvelteKit and Next.js examples end to end. A new check goes
+  into that script.
+- To release a package, bump its `version` in the change. Nothing runs
+  `./release.sh` by itself: whoever merges runs it from the merged commit,
+  right after the merge. It publishes each version that isn't on npm yet (a
+  prerelease goes to the `next` dist-tag) and creates its GitHub release,
+  tagged `<name>@<version>`. A merge that doesn't bump a version publishes
+  nothing. A package with `"private": true` is skipped.
+- Nobody else runs `./release.sh`, and nobody runs `npm publish`,
+  `gh release create`, `vercel deploy` or the publish workflow by hand.
 - `release.sh` publishes through `.github/workflows/publish.yml`, which runs
   only when started. npm trusts that workflow file by name (trusted
   publishing), so don't rename it.
 - The docs site deploys to Vercel from `master` (project `fsn.dev`, root
-  `docs/`), with preview deploys on PRs. That's Vercel's Git integration, not a
-  workflow here.
+  `docs/`), and Vercel builds a preview of each pushed branch. That's Vercel's
+  Git integration, not a workflow here.
