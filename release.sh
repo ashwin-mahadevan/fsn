@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Releases every package under `packages/` whose version isn't out yet: on npm,
-# with a GitHub release tagged `<name>@<version>`. The maintainer's merge queue
-# runs it after a merge to master. Don't run it yourself.
+# with a GitHub release tagged `<name>@<version>`. Nothing runs it by itself:
+# whoever merges a change into master runs it from the merged commit, right
+# after the merge. Nobody else runs it.
 #
 # It never publishes from this machine. It starts the `publish.yml` workflow on
 # GitHub for the commit it's run from (HEAD, which must be on master), waits
