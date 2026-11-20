@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 
+import { readFile } from 'node:fs/promises';
 import { build } from './build.js';
 import { init } from './init.js';
 
 const FRAMEWORKS = new Set(['sveltekit', 'nextjs']);
+
+/** The version of @fsn.dev/cli, from the package.json it was installed with. */
+async function version(): Promise<string> {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  if (typeof pkg.version !== 'string') {
+    throw new Error('@fsn.dev/cli is missing its version.');
+  }
+  return pkg.version;
+}
 
 const USAGE = `fsn — Full-Stack Native
 
@@ -13,6 +23,7 @@ Commands:
                                                --project defaults to "." (must be empty),
                                                --framework defaults to nextjs.
   fsn build                                    Build the current project into a native app.
+  fsn --version                                Print the version of @fsn.dev/cli. Also -v.
 
 Docs: https://fsn.dev/cli
 `;
@@ -20,6 +31,8 @@ Docs: https://fsn.dev/cli
 try {
   if (process.argv[2] === '--help' || process.argv[2] === '-h' || process.argv.length === 2) {
     process.stdout.write(USAGE);
+  } else if (process.argv[2] === '--version' || process.argv[2] === '-v') {
+    process.stdout.write((await version()) + '\n');
   } else if (process.argv[2] === 'build' && process.argv.length === 3) {
     await build();
   } else if (process.argv[2] === 'init') {

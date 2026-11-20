@@ -77,3 +77,7 @@ The app is built for the platform and architecture that the build runs on, and i
 ## `fsn --help`
 
 Prints the commands and their options. `fsn -h`, and `fsn` on its own, do the same.
+
+## `fsn --version`
+
+Prints the version of `@fsn.dev/cli` that is running. `fsn -v` does the same.
